@@ -155,8 +155,9 @@ bool ObsCore::start(QString *error)
 		applyPlan(plan, error);
 	}
 
-	createScene();
 	createAudio();
+	loadScenes();
+	setMicCleanup(s.value("audio/micCleanup", true).toBool());
 	m_cpu = os_cpu_usage_info_start();
 	return true;
 }
@@ -215,7 +216,7 @@ bool ObsCore::applyPlan(const VideoPlan &plan, QString *error)
 	if (plan.width != m_plan.width || plan.height != m_plan.height || plan.fps != m_plan.fps) {
 		if (!resetVideo(plan, error))
 			return false;
-		if (m_scene && oldWidth > 0)
+		if (!m_scenes.isEmpty() && oldWidth > 0)
 			rescaleItems(double(plan.width) / double(oldWidth));
 	}
 	m_plan = plan;
@@ -228,25 +229,230 @@ bool ObsCore::applyPlan(const VideoPlan &plan, QString *error)
 	return true;
 }
 
-void ObsCore::createScene()
+namespace {
+const QStringList TRANSITIONS = {"fade_transition", "cut_transition", "swipe_transition", "slide_transition",
+				 "fade_to_color_transition"};
+
+QString nameOf(obs_source_t *source)
 {
+	return QString::fromUtf8(obs_source_get_name(source));
+}
+} // namespace
+
+obs_source_t *ObsCore::sceneSource(const QString &name) const
+{
+	for (obs_source_t *s : m_scenes)
+		if (nameOf(s) == name)
+			return s;
+	return nullptr;
+}
+
+void ObsCore::loadScenes()
+{
+	Settings &st = Settings::get();
+	m_transitionId = st.value("scenes/transition", "fade_transition").toString();
+	if (!TRANSITIONS.contains(m_transitionId))
+		m_transitionId = "fade_transition";
+	m_transitionMs = std::clamp(st.value("scenes/transitionMs", 300).toInt(), 0, 5000);
+
+	QStringList order;
+	QString current;
 	const QString path = Settings::dataDir() + "/scene.json";
-	obs_data_t *root = obs_data_create_from_json_file_safe(path.toUtf8().constData(), "bak");
-	if (root) {
-		obs_data_array_t *sources = obs_data_get_array(root, "sources");
-		if (sources) {
+	if (obs_data_t *root = obs_data_create_from_json_file_safe(path.toUtf8().constData(), "bak")) {
+		if (obs_data_array_t *sources = obs_data_get_array(root, "sources")) {
 			obs_load_sources(sources, nullptr, nullptr);
 			obs_data_array_release(sources);
 		}
+		if (obs_data_array_t *names = obs_data_get_array(root, "scene_order")) {
+			for (size_t i = 0; i < obs_data_array_count(names); i++) {
+				obs_data_t *entry = obs_data_array_item(names, i);
+				order << QString::fromUtf8(obs_data_get_string(entry, "name"));
+				obs_data_release(entry);
+			}
+			obs_data_array_release(names);
+		}
+		current = QString::fromUtf8(obs_data_get_string(root, "current_scene"));
+		const std::pair<const char *, obs_source_t *> audio[] = {{"desktop_filters", m_desktop},
+									 {"mic_filters", m_mic}};
+		for (const auto &[key, source] : audio) {
+			obs_data_array_t *filters = obs_data_get_array(root, key);
+			if (filters && source)
+				obs_source_restore_filters(source, filters);
+			obs_data_array_release(filters);
+		}
 		obs_data_release(root);
-		m_sceneSource = obs_get_source_by_name(SCENE_NAME); // keeps the reference
 	}
-	if (!m_sceneSource) {
-		obs_scene_t *scene = obs_scene_create(SCENE_NAME);
-		m_sceneSource = obs_scene_get_source(scene); // the creation reference is ours
+	for (const QString &name : order) {
+		obs_source_t *source = obs_get_source_by_name(name.toUtf8().constData());
+		if (source && obs_source_is_scene(source) && !m_scenes.contains(source))
+			m_scenes << source; // keeps the reference
+		else
+			obs_source_release(source);
 	}
-	m_scene = obs_scene_from_source(m_sceneSource);
-	obs_set_output_source(0, m_sceneSource);
+	obs_enum_scenes(
+		[](void *param, obs_source_t *source) {
+			auto *list = static_cast<QVector<obs_source_t *> *>(param);
+			if (!list->contains(source))
+				list->append(obs_source_get_ref(source));
+			return true;
+		},
+		&m_scenes);
+	for (obs_source_t *scene : m_scenes)
+		if (nameOf(scene) == "Zunimi Main") // 0.1 had one hidden scene; it becomes the first visible one
+			obs_source_set_name(scene, uniqueName("Main").toUtf8().constData());
+	if (m_scenes.isEmpty())
+		m_scenes << obs_scene_get_source(obs_scene_create("Main")); // the creation reference is ours
+
+	m_transition = obs_source_create_private(m_transitionId.toUtf8().constData(), "Zunimi transition", nullptr);
+	obs_set_output_source(0, m_transition);
+	obs_source_t *first = sceneSource(current);
+	setCurrent(first ? first : m_scenes.first(), false);
+}
+
+void ObsCore::setCurrent(obs_source_t *source, bool animate)
+{
+	m_sceneSource = source;
+	m_scene = obs_scene_from_source(source);
+	const bool fade = animate && m_transitionMs > 0 && m_transitionId != "cut_transition";
+	if (!fade || !obs_transition_start(m_transition, OBS_TRANSITION_MODE_AUTO, uint32_t(m_transitionMs), source))
+		obs_transition_set(m_transition, source);
+	emit scenesChanged();
+	emit sceneChanged();
+}
+
+QStringList ObsCore::scenes() const
+{
+	QStringList names;
+	for (obs_source_t *s : m_scenes)
+		names << nameOf(s);
+	return names;
+}
+
+QString ObsCore::currentScene() const
+{
+	return m_sceneSource ? nameOf(m_sceneSource) : QString();
+}
+
+void ObsCore::setScene(const QString &name)
+{
+	obs_source_t *source = sceneSource(name);
+	if (!source || source == m_sceneSource)
+		return;
+	setCurrent(source, true);
+	save();
+}
+
+QString ObsCore::addScene(const QString &name)
+{
+	const QString unique = uniqueName(name.trimmed().isEmpty() ? "Scene" : name.trimmed());
+	obs_source_t *source = obs_scene_get_source(obs_scene_create(unique.toUtf8().constData()));
+	m_scenes << source;
+	setCurrent(source, true);
+	save();
+	return unique;
+}
+
+QString ObsCore::duplicateScene(const QString &name)
+{
+	obs_source_t *from = sceneSource(name);
+	if (!from)
+		return {};
+	const QString unique = uniqueName(name + " copy");
+	// Shared sources: the same webcam or game capture appears in both, which is what people expect.
+	obs_scene_t *copy = obs_scene_duplicate(obs_scene_from_source(from), unique.toUtf8().constData(),
+						OBS_SCENE_DUP_REFS);
+	obs_source_t *source = obs_scene_get_source(copy);
+	m_scenes.insert(m_scenes.indexOf(from) + 1, source);
+	setCurrent(source, true);
+	save();
+	return unique;
+}
+
+bool ObsCore::renameScene(const QString &from, const QString &to)
+{
+	obs_source_t *source = sceneSource(from);
+	const QString name = to.trimmed();
+	if (!source || name.isEmpty())
+		return false;
+	if (name == from)
+		return true;
+	if (obs_source_t *taken = obs_get_source_by_name(name.toUtf8().constData())) {
+		obs_source_release(taken);
+		return false;
+	}
+	obs_source_set_name(source, name.toUtf8().constData());
+	save();
+	emit scenesChanged();
+	return true;
+}
+
+bool ObsCore::removeScene(const QString &name)
+{
+	obs_source_t *source = sceneSource(name);
+	if (!source || m_scenes.size() <= 1)
+		return false;
+	const int index = int(m_scenes.indexOf(source));
+	if (source == m_sceneSource)
+		setCurrent(m_scenes[index > 0 ? index - 1 : 1], false);
+	QVector<obs_source_t *> used;
+	obs_scene_enum_items(
+		obs_scene_from_source(source),
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+			static_cast<QVector<obs_source_t *> *>(param)->append(
+				obs_source_get_ref(obs_sceneitem_get_source(item)));
+			return true;
+		},
+		&used);
+	m_scenes.removeAt(index);
+	obs_source_remove(source);
+	obs_source_release(source);
+	for (obs_source_t *s : used) { // sources only this scene used go with it
+		if (!usedByAnotherScene(s, nullptr))
+			obs_source_remove(s);
+		obs_source_release(s);
+	}
+	save();
+	emit scenesChanged();
+	return true;
+}
+
+void ObsCore::moveScene(const QString &name, bool up)
+{
+	obs_source_t *source = sceneSource(name);
+	const int i = int(m_scenes.indexOf(source)), j = up ? i - 1 : i + 1;
+	if (!source || j < 0 || j >= m_scenes.size())
+		return;
+	m_scenes.swapItemsAt(i, j);
+	save();
+	emit scenesChanged();
+}
+
+void ObsCore::setTransition(const QString &id, int ms)
+{
+	m_transitionMs = std::clamp(ms, 0, 5000);
+	Settings::get().set("scenes/transitionMs", m_transitionMs);
+	if (!TRANSITIONS.contains(id) || id == m_transitionId)
+		return;
+	obs_source_t *next = obs_source_create_private(id.toUtf8().constData(), "Zunimi transition", nullptr);
+	if (!next)
+		return;
+	obs_transition_set(next, m_sceneSource);
+	obs_set_output_source(0, next);
+	obs_source_release(m_transition);
+	m_transition = next;
+	m_transitionId = id;
+	Settings::get().set("scenes/transition", id);
+}
+
+bool ObsCore::usedByAnotherScene(obs_source_t *source, obs_scene_t *except) const
+{
+	const QByteArray name = obs_source_get_name(source);
+	for (obs_source_t *s : m_scenes) {
+		obs_scene_t *scene = obs_scene_from_source(s);
+		if (scene != except && obs_scene_find_source(scene, name.constData()))
+			return true;
+	}
+	return false;
 }
 
 void ObsCore::createAudio()
@@ -258,10 +464,8 @@ void ObsCore::createAudio()
 	obs_data_release(s);
 	if (m_desktop)
 		obs_set_output_source(1, m_desktop);
-	if (m_mic) {
+	if (m_mic)
 		obs_set_output_source(3, m_mic);
-		setMicCleanup(Settings::get().value("audio/micCleanup", true).toBool());
-	}
 	Settings &st = Settings::get();
 	if (m_desktop) {
 		obs_source_set_volume(m_desktop, float(st.value("audio/desktopVolume", 1.0).toDouble()));
@@ -273,24 +477,59 @@ void ObsCore::createAudio()
 	}
 }
 
+bool ObsCore::micCleanup() const
+{
+	obs_source_t *filter = m_mic ? obs_source_get_filter_by_name(m_mic, "Mic cleanup") : nullptr;
+	obs_source_release(filter);
+	return filter != nullptr;
+}
+
 void ObsCore::setMicCleanup(bool on)
 {
 	// RNNoise: light, runs on the CPU, removes keyboard and fan noise from the mic.
 	if (!m_mic)
 		return;
-	if (on && !m_micFilter) {
+	obs_source_t *filter = obs_source_get_filter_by_name(m_mic, "Mic cleanup");
+	if (on && !filter) {
 		obs_data_t *s = obs_data_create();
 		obs_data_set_string(s, "method", "rnnoise");
-		m_micFilter = obs_source_create_private("noise_suppress_filter", "Mic cleanup", s);
+		obs_source_t *created = obs_source_create_private("noise_suppress_filter", "Mic cleanup", s);
 		obs_data_release(s);
-		if (m_micFilter)
-			obs_source_filter_add(m_mic, m_micFilter);
-	} else if (!on && m_micFilter) {
-		obs_source_filter_remove(m_mic, m_micFilter);
-		obs_source_release(m_micFilter);
-		m_micFilter = nullptr;
+		if (created) {
+			obs_source_filter_add(m_mic, created);
+			obs_source_release(created);
+		}
+	} else if (!on && filter) {
+		obs_source_filter_remove(m_mic, filter);
 	}
+	obs_source_release(filter);
 	Settings::get().set("audio/micCleanup", on);
+	save();
+}
+
+QVector<obs_source_t *> ObsCore::audioSources() const
+{
+	QVector<obs_source_t *> list;
+	if (m_desktop)
+		list << m_desktop;
+	if (m_mic)
+		list << m_mic;
+	if (!m_scene)
+		return list;
+	QVector<obs_source_t *> scene;
+	obs_scene_enum_items(
+		m_scene,
+		[](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+			obs_source_t *source = obs_sceneitem_get_source(item);
+			const bool sound = (obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO) != 0;
+			const QString id = QString::fromUtf8(obs_source_get_id(source));
+			// a capture that is not sending sound (game/window audio off, a camera without a mic) is left out
+			if (sound && (obs_source_audio_active(source) || id.startsWith("wasapi") || id == "ffmpeg_source"))
+				static_cast<QVector<obs_source_t *> *>(param)->prepend(source);
+			return true;
+		},
+		&scene);
+	return list + scene;
 }
 
 QString ObsCore::uniqueName(const QString &base) const
@@ -305,74 +544,192 @@ QString ObsCore::uniqueName(const QString &base) const
 	}
 }
 
-obs_sceneitem_t *ObsCore::find(const QString &name) const
+obs_sceneitem_t *ObsCore::item(const QString &name) const
 {
 	return m_scene ? obs_scene_find_source(m_scene, name.toUtf8().constData()) : nullptr;
 }
 
-obs_source_t *ObsCore::addSource(const char *kind, const QString &name, obs_data_t *settings, Fit fit)
+void ObsCore::place(obs_sceneitem_t *item, const QRectF &box)
+{
+	vec2 v{};
+	obs_sceneitem_set_rot(item, 0.0f);
+	obs_sceneitem_set_alignment(item, OBS_ALIGN_LEFT | OBS_ALIGN_TOP);
+	obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_SCALE_INNER);
+	obs_sceneitem_set_bounds_alignment(item, OBS_ALIGN_CENTER);
+	vec2_set(&v, 1.0f, 1.0f);
+	obs_sceneitem_set_scale(item, &v);
+	vec2_set(&v, float(box.width()), float(box.height()));
+	obs_sceneitem_set_bounds(item, &v);
+	vec2_set(&v, float(box.x()), float(box.y()));
+	obs_sceneitem_set_pos(item, &v);
+}
+
+void ObsCore::fit(const QString &name, Fit how)
+{
+	obs_sceneitem_t *it = item(name);
+	if (!it)
+		return;
+	const double w = m_plan.width, h = m_plan.height;
+	switch (how) {
+	case Fit::Fill:
+		place(it, {0, 0, w, h});
+		break;
+	case Fit::Stretch:
+		place(it, {0, 0, w, h});
+		obs_sceneitem_set_bounds_type(it, OBS_BOUNDS_STRETCH);
+		break;
+	case Fit::Left:
+		place(it, {0, 0, w / 2, h});
+		break;
+	case Fit::Right:
+		place(it, {w / 2, 0, w / 2, h});
+		break;
+	case Fit::Corner: {
+		const double bw = w * 0.28, bh = h * 0.28, margin = h * 0.03;
+		place(it, {w - bw - margin, h - bh - margin, bw, bh});
+		obs_sceneitem_set_bounds_alignment(it, OBS_ALIGN_BOTTOM | OBS_ALIGN_RIGHT);
+		break;
+	}
+	case Fit::Center: {
+		vec2 v{};
+		obs_sceneitem_set_bounds_type(it, OBS_BOUNDS_NONE);
+		obs_sceneitem_set_alignment(it, OBS_ALIGN_CENTER);
+		vec2_set(&v, 1.0f, 1.0f);
+		obs_sceneitem_set_scale(it, &v);
+		vec2_set(&v, float(w / 2), float(h / 2));
+		obs_sceneitem_set_pos(it, &v);
+		break;
+	}
+	}
+	save();
+}
+
+obs_source_t *ObsCore::addSource(const char *kind, const QString &name, obs_data_t *settings, Fit how)
 {
 	const QString unique = uniqueName(name);
 	obs_source_t *source = obs_source_create(kind, unique.toUtf8().constData(), settings, nullptr);
 	if (!source)
 		return nullptr;
-	obs_sceneitem_t *item = obs_scene_add(m_scene, source);
-	const float w = float(m_plan.width), h = float(m_plan.height);
-	vec2 pos{}, bounds{};
-	switch (fit) {
-	case Fit::Fill:
-		obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_SCALE_INNER);
-		obs_sceneitem_set_bounds_alignment(item, OBS_ALIGN_CENTER);
-		vec2_set(&bounds, w, h);
-		obs_sceneitem_set_bounds(item, &bounds);
-		vec2_set(&pos, 0, 0);
-		obs_sceneitem_set_pos(item, &pos);
-		break;
-	case Fit::Corner: {
-		const float bw = w * 0.28f, bh = h * 0.28f, margin = h * 0.03f;
-		obs_sceneitem_set_bounds_type(item, OBS_BOUNDS_SCALE_INNER);
-		obs_sceneitem_set_bounds_alignment(item, OBS_ALIGN_BOTTOM | OBS_ALIGN_RIGHT);
-		vec2_set(&bounds, bw, bh);
-		obs_sceneitem_set_bounds(item, &bounds);
-		vec2_set(&pos, w - bw - margin, h - bh - margin);
-		obs_sceneitem_set_pos(item, &pos);
-		break;
-	}
-	case Fit::Center:
-		obs_sceneitem_set_alignment(item, OBS_ALIGN_CENTER);
-		vec2_set(&pos, w / 2, h / 2);
-		obs_sceneitem_set_pos(item, &pos);
-		break;
-	}
+	obs_scene_add(m_scene, source);
 	obs_source_release(source); // the scene keeps its own reference
+	fit(unique, how);
+	emit sceneChanged();
+	return source;
+}
+
+obs_source_t *ObsCore::addSourceAt(const char *kind, const QString &name, obs_data_t *settings, const QRectF &box)
+{
+	const QString unique = uniqueName(name);
+	obs_source_t *source = obs_source_create(kind, unique.toUtf8().constData(), settings, nullptr);
+	if (!source)
+		return nullptr;
+	place(obs_scene_add(m_scene, source), box);
+	obs_source_release(source);
 	save();
 	emit sceneChanged();
 	return source;
 }
 
+QStringList ObsCore::otherScenesSources() const
+{
+	QStringList names;
+	for (obs_source_t *s : m_scenes) {
+		if (s == m_sceneSource)
+			continue;
+		obs_scene_enum_items(
+			obs_scene_from_source(s),
+			[](obs_scene_t *, obs_sceneitem_t *it, void *param) {
+				const QString n = nameOf(obs_sceneitem_get_source(it));
+				auto *list = static_cast<QStringList *>(param);
+				if (!list->contains(n))
+					list->append(n);
+				return true;
+			},
+			&names);
+	}
+	names.erase(std::remove_if(names.begin(), names.end(), [this](const QString &n) { return item(n) != nullptr; }),
+		    names.end());
+	return names;
+}
+
+bool ObsCore::addExisting(const QString &name)
+{
+	if (item(name))
+		return false;
+	obs_source_t *source = obs_get_source_by_name(name.toUtf8().constData());
+	if (!source)
+		return false;
+	obs_transform_info info{};
+	bool found = false;
+	for (obs_source_t *s : m_scenes) { // same place as in the scene it comes from
+		if (obs_sceneitem_t *other = obs_scene_find_source(obs_scene_from_source(s), name.toUtf8().constData())) {
+			obs_sceneitem_get_info2(other, &info);
+			found = true;
+			break;
+		}
+	}
+	obs_sceneitem_t *added = obs_scene_add(m_scene, source);
+	if (found)
+		obs_sceneitem_set_info2(added, &info);
+	obs_source_release(source);
+	save();
+	emit sceneChanged();
+	return true;
+}
+
 void ObsCore::removeSource(const QString &name)
 {
-	if (obs_sceneitem_t *item = find(name)) {
-		obs_source_t *source = obs_sceneitem_get_source(item);
-		obs_sceneitem_remove(item);
+	obs_sceneitem_t *it = item(name);
+	if (!it)
+		return;
+	obs_source_t *source = obs_source_get_ref(obs_sceneitem_get_source(it));
+	obs_sceneitem_remove(it);
+	if (!usedByAnotherScene(source, nullptr))
 		obs_source_remove(source);
+	obs_source_release(source);
+	save();
+	emit sceneChanged();
+}
+
+bool ObsCore::renameSource(const QString &from, const QString &to)
+{
+	const QString name = to.trimmed();
+	obs_sceneitem_t *it = item(from);
+	if (!it || name.isEmpty())
+		return false;
+	if (name == from)
+		return true;
+	if (obs_source_t *taken = obs_get_source_by_name(name.toUtf8().constData())) {
+		obs_source_release(taken);
+		return false;
+	}
+	obs_source_set_name(obs_sceneitem_get_source(it), name.toUtf8().constData());
+	save();
+	emit sceneChanged();
+	return true;
+}
+
+void ObsCore::setVisible(const QString &name, bool visible)
+{
+	if (obs_sceneitem_t *it = item(name)) {
+		obs_sceneitem_set_visible(it, visible);
+		save();
+	}
+}
+
+void ObsCore::setLocked(const QString &name, bool locked)
+{
+	if (obs_sceneitem_t *it = item(name)) {
+		obs_sceneitem_set_locked(it, locked);
 		save();
 		emit sceneChanged();
 	}
 }
 
-void ObsCore::setVisible(const QString &name, bool visible)
-{
-	if (obs_sceneitem_t *item = find(name)) {
-		obs_sceneitem_set_visible(item, visible);
-		save();
-	}
-}
-
 void ObsCore::moveSource(const QString &name, bool up)
 {
-	if (obs_sceneitem_t *item = find(name)) {
-		obs_sceneitem_set_order(item, up ? OBS_ORDER_MOVE_UP : OBS_ORDER_MOVE_DOWN);
+	if (obs_sceneitem_t *it = item(name)) {
+		obs_sceneitem_set_order(it, up ? OBS_ORDER_MOVE_UP : OBS_ORDER_MOVE_DOWN);
 		save();
 		emit sceneChanged();
 	}
@@ -385,11 +742,11 @@ QVector<SceneItem> ObsCore::items() const
 		return list;
 	obs_scene_enum_items(
 		m_scene,
-		[](obs_scene_t *, obs_sceneitem_t *item, void *param) {
+		[](obs_scene_t *, obs_sceneitem_t *it, void *param) {
 			auto *out = static_cast<QVector<SceneItem> *>(param);
-			obs_source_t *source = obs_sceneitem_get_source(item);
-			out->prepend({QString::fromUtf8(obs_source_get_name(source)),
-				      QString::fromUtf8(obs_source_get_id(source)), obs_sceneitem_visible(item)});
+			obs_source_t *source = obs_sceneitem_get_source(it);
+			out->prepend({nameOf(source), QString::fromUtf8(obs_source_get_id(source)),
+				      obs_sceneitem_visible(it), obs_sceneitem_locked(it)});
 			return true;
 		},
 		&list);
@@ -398,26 +755,27 @@ QVector<SceneItem> ObsCore::items() const
 
 void ObsCore::rescaleItems(double ratio)
 {
-	obs_scene_enum_items(
-		m_scene,
-		[](obs_scene_t *, obs_sceneitem_t *item, void *param) {
-			const float r = float(*static_cast<double *>(param));
-			vec2 v{};
-			obs_sceneitem_get_pos(item, &v);
-			vec2_mulf(&v, &v, r);
-			obs_sceneitem_set_pos(item, &v);
-			if (obs_sceneitem_get_bounds_type(item) != OBS_BOUNDS_NONE) {
-				obs_sceneitem_get_bounds(item, &v);
+	for (obs_source_t *s : m_scenes)
+		obs_scene_enum_items(
+			obs_scene_from_source(s),
+			[](obs_scene_t *, obs_sceneitem_t *it, void *param) {
+				const float r = float(*static_cast<double *>(param));
+				vec2 v{};
+				obs_sceneitem_get_pos(it, &v);
 				vec2_mulf(&v, &v, r);
-				obs_sceneitem_set_bounds(item, &v);
-			} else {
-				obs_sceneitem_get_scale(item, &v);
-				vec2_mulf(&v, &v, r);
-				obs_sceneitem_set_scale(item, &v);
-			}
-			return true;
-		},
-		&ratio);
+				obs_sceneitem_set_pos(it, &v);
+				if (obs_sceneitem_get_bounds_type(it) != OBS_BOUNDS_NONE) {
+					obs_sceneitem_get_bounds(it, &v);
+					vec2_mulf(&v, &v, r);
+					obs_sceneitem_set_bounds(it, &v);
+				} else {
+					obs_sceneitem_get_scale(it, &v);
+					vec2_mulf(&v, &v, r);
+					obs_sceneitem_set_scale(it, &v);
+				}
+				return true;
+			},
+			&ratio);
 	save();
 }
 
@@ -433,10 +791,43 @@ void ObsCore::save()
 		nullptr);
 	obs_data_t *root = obs_data_create();
 	obs_data_set_array(root, "sources", sources);
+	obs_data_array_t *order = obs_data_array_create();
+	for (obs_source_t *s : m_scenes) {
+		obs_data_t *entry = obs_data_create();
+		obs_data_set_string(entry, "name", obs_source_get_name(s));
+		obs_data_array_push_back(order, entry);
+		obs_data_release(entry);
+	}
+	obs_data_set_array(root, "scene_order", order);
+	obs_data_set_string(root, "current_scene", obs_source_get_name(m_sceneSource));
+	const std::pair<const char *, obs_source_t *> audio[] = {{"desktop_filters", m_desktop}, {"mic_filters", m_mic}};
+	for (const auto &[key, source] : audio) {
+		if (!source)
+			continue;
+		obs_data_array_t *filters = obs_source_backup_filters(source);
+		obs_data_set_array(root, key, filters);
+		obs_data_array_release(filters);
+	}
 	const QString path = Settings::dataDir() + "/scene.json";
 	obs_data_save_json_safe(root, path.toUtf8().constData(), "tmp", "bak");
+	obs_data_array_release(order);
 	obs_data_array_release(sources);
 	obs_data_release(root);
+}
+
+QVector<QPair<QString, QString>> ObsCore::screens() const
+{
+	QVector<QPair<QString, QString>> list;
+	obs_properties_t *props = obs_get_source_properties("monitor_capture");
+	obs_property_t *p = props ? obs_properties_get(props, "monitor_id") : nullptr;
+	for (size_t i = 0; p && i < obs_property_list_item_count(p); i++) {
+		const QString id = QString::fromUtf8(obs_property_list_item_string(p, i));
+		if (!id.isEmpty() && id != "DUMMY")
+			list.append({QString::fromUtf8(obs_property_list_item_name(p, i)), id});
+	}
+	if (props)
+		obs_properties_destroy(props);
+	return list;
 }
 
 // ---- encoders and outputs
@@ -452,6 +843,7 @@ bool ObsCore::ensureEncoders(QString *error)
 			return false;
 		}
 		obs_encoder_set_video(m_video, obs_get_video());
+		m_bitrateNow = m_plan.bitrate;
 	}
 	if (!m_audio) {
 		obs_data_t *s = obs_data_create();
@@ -536,6 +928,7 @@ bool ObsCore::startStream(const QString &server, const QString &key, QString *er
 	}
 	obs_output_set_service(m_stream, m_service);
 	m_lastOutTotal = m_lastOutDropped = 0;
+	m_badSeconds = m_goodSeconds = 0;
 	return startWithFallback(m_stream, error);
 }
 
@@ -577,6 +970,63 @@ void ObsCore::stopRecording()
 		obs_output_stop(m_record);
 }
 
+bool ObsCore::startReplay(const QString &folder, int seconds, QString *error)
+{
+	if (replaying())
+		return true;
+	if (!QDir().mkpath(folder)) {
+		*error = "The replay folder cannot be used. Pick another one in Settings > Recording.";
+		return false;
+	}
+	if (!ensureEncoders(error))
+		return false;
+	seconds = std::clamp(seconds, 5, 600);
+	obs_data_t *s = obs_data_create();
+	obs_data_set_string(s, "directory", QDir::toNativeSeparators(folder).toUtf8().constData());
+	obs_data_set_string(s, "format", "Replay %CCYY-%MM-%DD %hh-%mm-%ss");
+	obs_data_set_string(s, "extension", "mp4");
+	obs_data_set_bool(s, "allow_spaces", true);
+	obs_data_set_int(s, "max_time_sec", seconds);
+	// memory cap: twice what the bitrate needs for that long, so the time limit is what normally applies
+	obs_data_set_int(s, "max_size_mb", std::max(64, (m_plan.bitrate + 160) * seconds / 8 / 1024 * 2));
+	if (!m_replay) {
+		m_replay = obs_output_create("replay_buffer", "Zunimi replay", s, nullptr);
+		if (!m_replay) {
+			obs_data_release(s);
+			*error = "The replay buffer is not available.";
+			return false;
+		}
+		signal_handler_t *sh = obs_output_get_signal_handler(m_replay);
+		signal_handler_connect(sh, "start", onReplayStart, this);
+		signal_handler_connect(sh, "stop", onReplayStop, this);
+		signal_handler_connect(sh, "saved", onReplaySaved, this);
+	} else {
+		obs_output_update(m_replay, s);
+	}
+	obs_data_release(s);
+	return startWithFallback(m_replay, error);
+}
+
+void ObsCore::stopReplay()
+{
+	if (m_replay && obs_output_active(m_replay))
+		obs_output_stop(m_replay);
+}
+
+void ObsCore::saveReplay()
+{
+	if (!replaying())
+		return;
+	calldata_t cd{};
+	proc_handler_call(obs_output_get_proc_handler(m_replay), "save", &cd);
+	calldata_free(&cd);
+}
+
+bool ObsCore::replaying() const
+{
+	return m_replay && obs_output_active(m_replay);
+}
+
 bool ObsCore::streaming() const
 {
 	return m_stream && obs_output_active(m_stream);
@@ -603,6 +1053,8 @@ void ObsCore::onStreamStop(void *data, calldata_t *cd)
 	QMetaObject::invokeMethod(
 		self,
 		[self, why] {
+			if (self->m_video && self->m_bitrateNow != self->m_plan.bitrate)
+				self->setBitrate(self->m_plan.bitrate); // self-healing only lasts for that stream
 			emit self->streamingChanged(false);
 			if (!why.isEmpty())
 				emit self->problem(why);
@@ -648,6 +1100,87 @@ void ObsCore::onRecordStop(void *data, calldata_t *cd)
 		Qt::QueuedConnection);
 }
 
+void ObsCore::onReplayStart(void *data, calldata_t *)
+{
+	auto *self = static_cast<ObsCore *>(data);
+	QMetaObject::invokeMethod(self, [self] { emit self->replayChanged(true); }, Qt::QueuedConnection);
+}
+
+void ObsCore::onReplayStop(void *data, calldata_t *cd)
+{
+	auto *self = static_cast<ObsCore *>(data);
+	const int code = int(calldata_int(cd, "code"));
+	const QString why = code == OBS_OUTPUT_SUCCESS ? QString()
+						       : stopReason(code, obs_output_get_last_error(self->m_replay));
+	QMetaObject::invokeMethod(
+		self,
+		[self, why] {
+			emit self->replayChanged(false);
+			if (!why.isEmpty())
+				emit self->problem(why);
+		},
+		Qt::QueuedConnection);
+}
+
+void ObsCore::onReplaySaved(void *data, calldata_t *)
+{
+	auto *self = static_cast<ObsCore *>(data);
+	QMetaObject::invokeMethod(
+		self,
+		[self] {
+			if (!self->m_replay)
+				return;
+			calldata_t cd{};
+			proc_handler_call(obs_output_get_proc_handler(self->m_replay), "get_last_replay", &cd);
+			const QString path = QString::fromUtf8(calldata_string(&cd, "path"));
+			calldata_free(&cd);
+			emit self->replaySaved(path);
+		},
+		Qt::QueuedConnection);
+}
+
+void ObsCore::setBitrate(int kbps)
+{
+	if (!m_video)
+		return;
+	obs_data_t *s = obs_data_create();
+	obs_data_set_int(s, "bitrate", kbps);
+	obs_encoder_update(m_video, s);
+	obs_data_release(s);
+	m_bitrateNow = kbps;
+}
+
+// Self-healing: when the internet can't keep up, lower the bitrate step by step instead of dropping frames,
+// then raise it again once it has been steady for a minute. Never below 40% of the chosen bitrate.
+void ObsCore::heal(Health &h)
+{
+	h.bitrate = m_bitrateNow ? m_bitrateNow : m_plan.bitrate;
+	if (!streaming() || !Settings::get().value("stream/autoHeal", true).toBool()) {
+		m_badSeconds = m_goodSeconds = 0;
+		return;
+	}
+	if (h.dropped >= 2.0) {
+		m_badSeconds++;
+		m_goodSeconds = 0;
+	} else if (++m_goodSeconds >= 10) {
+		m_badSeconds = 0;
+	}
+	const int floor = std::max(600, m_plan.bitrate * 40 / 100);
+	if (m_badSeconds >= 4 && m_bitrateNow > floor) {
+		setBitrate(std::max(floor, m_bitrateNow * 75 / 100));
+		m_badSeconds = 0;
+		emit notice(QString("Your internet is struggling, so Zunimi lowered the bitrate to %1 kbps to keep you "
+				    "live. It goes back up when things settle.")
+				    .arg(m_bitrateNow));
+	} else if (m_goodSeconds >= 60 && m_bitrateNow < m_plan.bitrate) {
+		setBitrate(std::min(m_plan.bitrate, m_bitrateNow * 115 / 100));
+		m_goodSeconds = 0;
+		if (m_bitrateNow == m_plan.bitrate)
+			emit notice(QString("Internet is steady again: bitrate back to %1 kbps.").arg(m_bitrateNow));
+	}
+	h.bitrate = m_bitrateNow;
+}
+
 // ---- health
 Health ObsCore::health()
 {
@@ -678,6 +1211,7 @@ Health ObsCore::health()
 		m_lastOutDropped = outDropped;
 	}
 
+	heal(h);
 	// The worst problem wins, explained in words a beginner understands.
 	h.text = busy() ? "All smooth" : "Ready";
 	auto flag = [&h](double value, const QString &warn, const QString &bad) {
@@ -693,6 +1227,8 @@ Health ObsCore::health()
 	     "Your PC can't encode fast enough. Switch to Potato or a hardware encoder in Settings.");
 	flag(h.dropped, "Your internet dropped a few frames.",
 	     "Your internet is dropping frames. Lower the bitrate in Settings > Video.");
+	if (h.level == 0 && streaming() && h.bitrate < m_plan.bitrate)
+		h.text = QString("Live at a safer %1 kbps while your internet recovers").arg(h.bitrate);
 	return h;
 }
 
@@ -702,6 +1238,7 @@ void ObsCore::shutdown()
 		return;
 	stopStream();
 	stopRecording();
+	stopReplay();
 	save();
 	obs_set_output_source(0, nullptr);
 	obs_set_output_source(1, nullptr);
@@ -710,6 +1247,9 @@ void ObsCore::shutdown()
 		obs_output_release(m_stream);
 	if (m_record)
 		obs_output_release(m_record);
+	if (m_replay)
+		obs_output_release(m_replay);
+	m_replay = nullptr;
 	if (m_service)
 		obs_service_release(m_service);
 	m_stream = m_record = nullptr;
@@ -719,19 +1259,30 @@ void ObsCore::shutdown()
 	if (m_audio)
 		obs_encoder_release(m_audio);
 	m_video = m_audio = nullptr;
-	if (m_micFilter)
-		obs_source_release(m_micFilter);
 	if (m_mic)
 		obs_source_release(m_mic);
 	if (m_desktop)
 		obs_source_release(m_desktop);
-	if (m_sceneSource)
-		obs_source_release(m_sceneSource);
-	m_micFilter = m_mic = m_desktop = m_sceneSource = nullptr;
+	if (m_transition)
+		obs_source_release(m_transition);
+	for (obs_source_t *scene : m_scenes)
+		obs_source_release(scene);
+	m_scenes.clear();
+	m_mic = m_desktop = m_transition = m_sceneSource = nullptr;
 	m_scene = nullptr;
 	if (m_cpu)
 		os_cpu_usage_info_destroy(m_cpu);
 	m_cpu = nullptr;
+	// The same teardown as OBS: remove every scene and source, then let libobs's destroy thread finish before
+	// shutting down, so nothing is freed twice (a race that showed up when quitting right after starting).
+	auto remove = [](void *, obs_source_t *source) {
+		obs_source_remove(source);
+		return true;
+	};
+	obs_enum_scenes(remove, nullptr);
+	obs_enum_sources(remove, nullptr);
+	while (obs_wait_for_destroy_queue()) {
+	}
 	obs_shutdown();
 	m_started = false;
 }

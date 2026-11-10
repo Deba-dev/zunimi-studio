@@ -119,7 +119,8 @@ void Updater::check(bool manual)
 				emit failed("Could not check for updates (" + reply->errorString().left(60) + ").");
 			return;
 		}
-		const QList<int> current = parseVersion(ZUNIMI_VERSION);
+		// ZUNIMI_PRETEND_VERSION lets the self-test act as an older build and fetch a real installer
+		const QList<int> current = parseVersion(qEnvironmentVariable("ZUNIMI_PRETEND_VERSION", ZUNIMI_VERSION));
 		UpdateInfo best;
 		QList<int> bestVersion = current;
 		for (const QJsonValue &value : QJsonDocument::fromJson(reply->readAll()).array()) {

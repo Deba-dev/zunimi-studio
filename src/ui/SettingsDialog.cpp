@@ -2,6 +2,7 @@
 
 #include "core/ObsCore.h"
 #include "core/Settings.h"
+#include "ui/Hotkeys.h"
 #include "ui/WindowModes.h"
 #include "version.h"
 
@@ -10,6 +11,8 @@
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QKeySequenceEdit>
+#include <QScrollArea>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -54,6 +57,7 @@ SettingsDialog::SettingsDialog(ObsCore *core, WindowModes *modes, QWidget *paren
 	m_tabs->addTab(streamTab(), "Stream");
 	m_tabs->addTab(videoTab(), "Video");
 	m_tabs->addTab(recordingTab(), "Recording");
+	m_tabs->addTab(hotkeysTab(), "Hotkeys");
 	m_tabs->addTab(windowTab(), "Window");
 	m_tabs->addTab(aboutTab(), "About this PC");
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
@@ -101,6 +105,12 @@ QWidget *SettingsDialog::streamTab()
 	form->addRow("Stream key", keyRow);
 	form->addRow("", m_serverHint);
 	form->addRow("", hint("Your key is encrypted by Windows and never leaves this PC except to your platform."));
+	m_autoHeal = new QCheckBox("Keep me live when the internet struggles");
+	m_autoHeal->setChecked(s.value("stream/autoHeal", true).toBool());
+	form->addRow("", m_autoHeal);
+	form->addRow("", hint("When frames start dropping, Zunimi lowers the bitrate step by step (never below 40%) "
+			      "instead of letting the stream stutter, then raises it again once your connection is steady. "
+			      "A recording made at the same time follows the same bitrate."));
 	m_platform->setCurrentIndex(std::max(0, m_platform->findData(s.value("stream/platform", "twitch"))));
 	connect(m_platform, &QComboBox::currentIndexChanged, this, &SettingsDialog::platformChanged);
 	platformChanged();
@@ -216,6 +226,49 @@ QWidget *SettingsDialog::recordingTab()
 	form->addRow("Save recordings to", row);
 	form->addRow("", hint("Recordings are MP4 files that survive a crash or power cut. They use the same quality as "
 			      "the stream, so recording while live costs almost nothing extra."));
+	m_replaySeconds = new QSpinBox;
+	m_replaySeconds->setRange(5, 600);
+	m_replaySeconds->setSingleStep(15);
+	m_replaySeconds->setSuffix(" seconds");
+	m_replaySeconds->setValue(Settings::get().value("replay/seconds", 30).toInt());
+	m_replayAuto = new QCheckBox("Turn the replay buffer on when Zunimi Studio starts");
+	m_replayAuto->setChecked(Settings::get().value("replay/autoStart", false).toBool());
+	form->addRow("Replay length", m_replaySeconds);
+	form->addRow("", m_replayAuto);
+	form->addRow("", hint("The replay buffer keeps the last moments in memory. Save replay (button, tray or "
+			      "hotkey) writes them to an MP4 in the same folder. While it is on, the encoder runs, "
+			      "so it costs a little GPU or CPU even when you are not live."));
+	return page;
+}
+
+QWidget *SettingsDialog::hotkeysTab()
+{
+	auto *page = new QWidget;
+	auto *outer = new QVBoxLayout(page);
+	outer->setContentsMargins(18, 18, 18, 18);
+	outer->addWidget(hint("These work everywhere, even while a game is fullscreen. Click a box and press the "
+			      "keys, for example Ctrl+F9. Use a combination games don't need."));
+	auto *area = new QScrollArea;
+	area->setWidgetResizable(true);
+	area->setFrameShape(QFrame::NoFrame);
+	area->setObjectName("clear");
+	auto *inner = new QWidget;
+	inner->setObjectName("clearInner");
+	auto *form = new QFormLayout(inner);
+	form->setVerticalSpacing(8);
+	for (const Hotkeys::Action &a : Hotkeys::actions()) {
+		auto *edit = new QKeySequenceEdit(QKeySequence(Settings::get().value("hotkeys/" + a.id).toString()));
+		edit->setMaximumSequenceLength(1);
+		auto *clear = new QPushButton("Clear");
+		connect(clear, &QPushButton::clicked, edit, &QKeySequenceEdit::clear);
+		auto *row = new QHBoxLayout;
+		row->addWidget(edit, 1);
+		row->addWidget(clear);
+		form->addRow(a.label, row);
+		m_keys.append({a.id, edit});
+	}
+	area->setWidget(inner);
+	outer->addWidget(area, 1);
 	return page;
 }
 
@@ -300,6 +353,19 @@ void SettingsDialog::save()
 	s.set("tray/close", m_closeTray->isChecked());
 	s.set("tray/esc", m_escTray->isChecked());
 	s.set("update/auto", m_autoUpdate->isChecked());
+	s.set("stream/autoHeal", m_autoHeal->isChecked());
+	s.set("replay/seconds", m_replaySeconds->value());
+	s.set("replay/autoStart", m_replayAuto->isChecked());
+	QStringList bad;
+	for (const auto &[id, edit] : m_keys) {
+		const QKeySequence keys = edit->keySequence();
+		if (!keys.isEmpty() && !Hotkeys::supported(keys))
+			bad << keys.toString(QKeySequence::NativeText);
+		s.set("hotkeys/" + id, Hotkeys::supported(keys) ? keys.toString(QKeySequence::PortableText) : QString());
+	}
+	if (!bad.isEmpty())
+		QMessageBox::information(this, "Hotkeys", "These keys can't be used as hotkeys, so they were left empty: " +
+								  bad.join(", "));
 	m_modes->syncTray();
 	if (m_mode->currentData().toString() != m_modes->mode())
 		m_modes->setMode(m_mode->currentData().toString());

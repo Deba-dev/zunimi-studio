@@ -8,7 +8,8 @@ param(
     [string]$ObsInstall = "D:\zunimi-build\obs-install",
     [string]$Config = "RelWithDebInfo",
     [switch]$Run,
-    [switch]$Package
+    [switch]$Package,
+    [switch]$Icon
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
@@ -19,6 +20,17 @@ $env:PATH = "D:\zunimi-build\tools\Scripts;$env:PATH"
 cmake -S $root -B $build -G "Visual Studio 17 2022" -A x64 -DCMAKE_GENERATOR_INSTANCE=D:/BuildTools `
     "-DOBS_SOURCE_DIR=$($ObsSource -replace '\\','/')" | Out-Host
 if ($LASTEXITCODE) { throw "configure failed" }
+if ($Icon) {
+    # Re-render the app icon and logo PNGs from resources\logo.svg (they are committed, so this is only needed after a logo change).
+    cmake --build $build --config $Config --target make-icon | Out-Host
+    if ($LASTEXITCODE) { throw "make-icon failed" }
+    $qtBin = (Get-ChildItem "$ObsSource\.deps" -Directory -Filter "obs-deps-qt6-*-x64" | Select-Object -First 1).FullName + "\bin"
+    $env:QT_PLUGIN_PATH = (Split-Path $qtBin) + "\plugins"
+    $old = $env:PATH; $env:PATH = "$qtBin;$env:PATH"
+    & "$build\$Config\make-icon.exe" "$root\resources\logo.svg" "$root\resources" -platform minimal | Out-Host
+    $env:PATH = $old
+    if ($LASTEXITCODE) { throw "rendering the icon failed" }
+}
 cmake --build $build --config $Config --parallel | Out-Host
 if ($LASTEXITCODE) { throw "build failed" }
 

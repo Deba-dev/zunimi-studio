@@ -17,6 +17,7 @@ QPushButton { background: @raised; border: 1px solid @line; border-radius: 10px;
 QPushButton:hover { border-color: @accent; }
 QPushButton:pressed { background: @line; }
 QPushButton:disabled { color: @mute; }
+QPushButton[on="true"] { color: @accent; border: 2px solid @accent; }
 QPushButton#primary { background: @accent; color: #031016; border: none; font-weight: 700; }
 QPushButton#primary:hover { background: #5EE3F4; }
 QPushButton#live { background: @live; color: white; border: none; font-weight: 700; font-size: 11pt; padding: 12px 22px; }
@@ -24,9 +25,10 @@ QPushButton#live:hover { background: #FF5C78; }
 QPushButton#live[on="true"] { background: @raised; color: @live; border: 2px solid @live; }
 QPushButton#rec { font-weight: 700; font-size: 11pt; padding: 12px 22px; }
 QPushButton#rec[on="true"] { color: @rec; border: 2px solid @rec; }
-QPushButton#icon { padding: 6px 10px; min-width: 18px; }
+QPushButton#icon { padding: 5px 8px; min-width: 16px; }
 
 QListWidget { background: transparent; border: none; outline: none; }
+QScrollArea#clear, QScrollArea#clear > QWidget#qt_scrollarea_viewport, QWidget#clearInner { background: transparent; border: none; }
 QListWidget::item { padding: 8px 6px; border-radius: 8px; margin: 1px 0; }
 QListWidget::item:selected { background: @raised; color: @text; }
 QListWidget::item:hover { background: #161A23; }

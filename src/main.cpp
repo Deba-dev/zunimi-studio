@@ -1,7 +1,9 @@
 #include "core/ObsCore.h"
 #include "core/Settings.h"
 #include "core/Updater.h"
+#include "ui/FiltersDialog.h"
 #include "ui/MainWindow.h"
+#include "ui/PropertiesView.h"
 #include "ui/Theme.h"
 #include "ui/WindowModes.h"
 #include "version.h"
@@ -11,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QIcon>
 #include <QLockFile>
 #include <QMessageBox>
 #include <QTimer>
@@ -67,6 +70,10 @@ int main(int argc, char *argv[])
 	app.setQuitOnLastWindowClosed(false); // hiding to the tray must not end the app
 	app.setStyle("Fusion");
 	app.setStyleSheet(Theme::styleSheet());
+	QIcon icon;
+	for (int size : {32, 64, 256})
+		icon.addFile(QString(":/logo-%1.png").arg(size), QSize(size, size));
+	app.setWindowIcon(icon); // window, taskbar and tray
 
 	QLockFile lock(Settings::dataDir() + "/running.lock");
 	if (!lock.tryLock(100)) {
@@ -112,6 +119,82 @@ int main(int argc, char *argv[])
 				}
 			});
 		}
+		if (app.arguments().contains("--selftest-screens")) {
+			// Lists every screen and capture method libobs offers, captures each screen and logs its size.
+			QTimer::singleShot(500, &app, [&core, &window] {
+				obs_source_t *probe = obs_source_create_private("monitor_capture", "probe", nullptr);
+				obs_properties_t *props = obs_source_properties(probe);
+				for (const char *name : {"method", "monitor_id"}) {
+					obs_property_t *p = obs_properties_get(props, name);
+					for (size_t i = 0; p && i < obs_property_list_item_count(p); i++)
+						blog(LOG_INFO, "selftest screens: %s [%s] = %s%s", name,
+						     obs_property_list_item_name(p, i),
+						     obs_property_list_format(p) == OBS_COMBO_FORMAT_STRING
+							     ? obs_property_list_item_string(p, i)
+							     : QByteArray::number(obs_property_list_item_int(p, i)).constData(),
+						     obs_property_list_item_disabled(p, i) ? " (disabled)" : "");
+				}
+				obs_properties_destroy(props);
+				obs_source_release(probe);
+				const auto screens = core.screens();
+				for (const auto &[label, id] : screens) {
+					obs_data_t *s = obs_data_create();
+					obs_data_set_string(s, "monitor_id", id.toUtf8().constData());
+					core.addSource("monitor_capture", label, s, ObsCore::Fit::Fill);
+					obs_data_release(s);
+				}
+				QTimer::singleShot(2500, &core, [&core, &window] {
+					for (const SceneItem &item : core.items()) {
+						obs_source_t *src = obs_get_source_by_name(item.name.toUtf8().constData());
+						blog(LOG_INFO, "selftest screens: captured '%s' %ux%u", item.name.toUtf8().constData(),
+						     obs_source_get_width(src), obs_source_get_height(src));
+						obs_source_release(src);
+					}
+					window.modes()->quit();
+				});
+			});
+		}
+		if (app.arguments().contains("--selftest-scenes")) {
+			// Scenes, shared sources, transitions and the replay buffer, end to end. Run with ZUNIMI_DATA set.
+			QTimer::singleShot(800, &app, [&core] {
+				core.addSource("monitor_capture", "Screen", nullptr, ObsCore::Fit::Fill);
+				const QString copy = core.duplicateScene(core.currentScene());
+				const QString extra = core.addScene("Starting soon");
+				core.addExisting("Screen");
+				core.setScene(core.scenes().first());
+				blog(LOG_INFO, "selftest scenes: %s | current %s | copy has %d items | extra has %d",
+				     core.scenes().join(", ").toUtf8().constData(), core.currentScene().toUtf8().constData(),
+				     [&] { core.setScene(copy); int n = int(core.items().size()); core.setScene(core.scenes().first()); return n; }(),
+				     [&] { core.setScene(extra); int n = int(core.items().size()); core.setScene(core.scenes().first()); return n; }());
+				QString err;
+				if (!core.startReplay(Settings::dataDir() + "/selftest", 10, &err))
+					blog(LOG_ERROR, "selftest scenes: replay failed: %s", err.toUtf8().constData());
+			});
+			QObject::connect(&core, &ObsCore::replayChanged, &app, [&core](bool on) {
+				if (on)
+					QTimer::singleShot(4000, &core, [&core] { core.saveReplay(); });
+			});
+			QObject::connect(&core, &ObsCore::replaySaved, &app, [&core, &window](const QString &file) {
+				blog(LOG_INFO, "selftest scenes: replay saved %s (%lld bytes)", file.toUtf8().constData(),
+				     QFileInfo(file).size());
+				core.removeScene("Starting soon");
+				blog(LOG_INFO, "selftest scenes: after remove: %s", core.scenes().join(", ").toUtf8().constData());
+				core.stopReplay();
+				QTimer::singleShot(800, [&window] { window.modes()->quit(); });
+			});
+		}
+		if (app.arguments().contains("--demo-dialogs")) {
+			// Opens a source's options and the mic's filters side by side, for screenshots and UI checks.
+			QTimer::singleShot(800, &app, [&core, &window] {
+				obs_source_t *src = core.addSource("window_capture", "Window", nullptr, ObsCore::Fit::Fill);
+				auto *props = new PropertiesDialog(src, "Window", &window);
+				props->setAttribute(Qt::WA_DeleteOnClose);
+				props->show();
+				auto *filters = new FiltersDialog(core.microphone(), &window);
+				filters->setAttribute(Qt::WA_DeleteOnClose);
+				filters->show();
+			});
+		}
 		if (app.arguments().contains("--selftest-update")) {
 			// Checks the link rules, then asks GitHub for releases and logs what it finds. Run with ZUNIMI_DATA set.
 			const bool rules =
@@ -127,8 +210,14 @@ int main(int argc, char *argv[])
 				blog(LOG_INFO, "selftest update: %s", what.toUtf8().constData());
 				QTimer::singleShot(200, [&window] { window.modes()->quit(); });
 			};
-			QObject::connect(updater, &Updater::found, &app, [done](const UpdateInfo &i) {
-				done("found " + i.version + " " + i.asset + " " + i.digest);
+			QObject::connect(updater, &Updater::found, &app, [updater](const UpdateInfo &i) {
+				blog(LOG_INFO, "selftest update: found %s %s %s", i.version.toUtf8().constData(),
+				     i.asset.toUtf8().constData(), i.digest.toUtf8().constData());
+				updater->download(i); // downloads and checks the real installer, never runs it
+			});
+			QObject::connect(updater, &Updater::ready, &app, [done](const QString &path) {
+				done(QString("downloaded and verified %1 (%2 bytes)").arg(path).arg(QFileInfo(path).size()));
+				QFile::remove(path);
 			});
 			QObject::connect(updater, &Updater::nothing, &app, [done] { done("no newer version"); });
 			QObject::connect(updater, &Updater::failed, &app, [done](const QString &r) { done("failed: " + r); });

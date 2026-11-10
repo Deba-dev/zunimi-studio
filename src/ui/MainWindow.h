@@ -2,19 +2,22 @@
 #include <QElapsedTimer>
 #include <QMainWindow>
 
-#include "core/Updater.h"
-
 #include <obs.h>
 
+#include "core/Updater.h"
+
+class Hotkeys;
+class Mixer;
 class ObsCore;
 class PreviewWidget;
 class WindowModes;
 class QAction;
-class QCheckBox;
+class QComboBox;
 class QLabel;
 class QListWidget;
+class QMenu;
 class QPushButton;
-class QSlider;
+class QSpinBox;
 class QStackedWidget;
 class QTimer;
 
@@ -31,34 +34,56 @@ protected:
 
 private:
 	QWidget *buildTopBar();
+	QWidget *buildScenes();
 	QWidget *buildSources();
 	QWidget *buildPreview();
 	QWidget *buildBottomBar();
-	QWidget *audioControl(const QString &label, obs_source_t *source, const QString &key);
-	void buildTray();
 	QWidget *buildUpdateBar();
-	void showUpdate(const QString &text, const QString &go, const QString &later);
-	void updateClicked();
+	void buildTray();
+	void fillAddMenu(QMenu *menu);
 
-	void addSource(const QString &kind);
-	bool pick(obs_source_t *source, const char *property, const QString &title);
-	void changeSelected();
+	// scenes
+	void refreshScenes();
+	void renameScene();
+	// sources
 	void refreshSources();
+	void addSource(const QString &kind);
+	void addScreen(const QString &id, const QString &label);
+	void addAllScreens();
+	QString selectedSource() const;
+	void selectSource(const QString &name);
+	void sourceMenu(const QString &name, const QPoint &global);
+	void openProperties(const QString &name, bool justAdded = false);
+	void openFilters(obs_source_t *source);
+	void renameSource(const QString &name);
+	// outputs
 	void toggleStream();
 	void toggleRecord();
+	void toggleReplay();
+	void saveReplay();
+	void hotkey(const QString &action);
+	void applyHotkeys();
 	void openSettings(int tab = 0);
 	void tick();
 	void updatePreview();
 	void updateButtons();
 	void say(const QString &text, bool bad = false);
 	QString quitWouldStop() const;
+	// updates
+	void showUpdate(const QString &text, const QString &go, const QString &later);
+	void updateClicked();
 
 	ObsCore *m_core;
 	WindowModes *m_modes;
+	Hotkeys *m_hotkeys;
 	PreviewWidget *m_preview = nullptr;
 	QStackedWidget *m_previewStack = nullptr;
+	QListWidget *m_scenes = nullptr;
+	QComboBox *m_transition = nullptr;
+	QSpinBox *m_transitionMs = nullptr;
 	QListWidget *m_sources = nullptr;
 	QLabel *m_empty = nullptr;
+	Mixer *m_mixer = nullptr;
 	QLabel *m_health = nullptr;
 	QLabel *m_healthDot = nullptr;
 	QLabel *m_stats = nullptr;
@@ -67,13 +92,15 @@ private:
 	QLabel *m_clock = nullptr;
 	QPushButton *m_live = nullptr;
 	QPushButton *m_rec = nullptr;
+	QPushButton *m_replay = nullptr;
+	QPushButton *m_saveReplay = nullptr;
 	QAction *m_trayLive = nullptr;
 	QAction *m_trayRec = nullptr;
+	QAction *m_trayReplay = nullptr;
 	QTimer *m_ticker = nullptr;
 	QTimer *m_bannerTimer = nullptr;
 	QElapsedTimer m_liveSince;
 	bool m_previewWanted = true;
-	bool m_shown = false;
 
 	Updater *m_updater = nullptr;
 	UpdateInfo m_update;
