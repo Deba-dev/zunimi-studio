@@ -1,0 +1,61 @@
+# Builds ZunimiStudio-Setup.exe for a release and attaches it to that release.
+# The app itself is built on the developer PC (libobs needs the local toolchain, see scripts/build.ps1 -Package),
+# and the release is created with that zip; this job wraps the zip into the installer the updater downloads.
+name: Installer
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build the installer for (for example v0.1.1)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Get the release zip
+        shell: pwsh
+        run: |
+          gh release download $env:TAG -p "ZunimiStudio-*-windows-x64.zip" -D release
+          $zip = Get-ChildItem release -Filter *.zip | Select-Object -First 1
+          if (-not $zip) { throw "The release has no ZunimiStudio-*-windows-x64.zip" }
+          Expand-Archive $zip.FullName -DestinationPath unpacked
+          $stage = Get-ChildItem unpacked -Directory | Select-Object -First 1
+          if (-not (Test-Path "$($stage.FullName)\bin\64bit\zunimi-studio.exe")) { throw "zunimi-studio.exe is missing from the zip" }
+          "STAGE=$($stage.FullName)" >> $env:GITHUB_ENV
+
+      - name: Check the version matches the tag
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+          if ("v$version" -ne $env:TAG) { throw "CMakeLists.txt says $version but the tag is $env:TAG" }
+          $file = (Get-Item "$env:STAGE\bin\64bit\zunimi-studio.exe").VersionInfo.ProductVersion
+          if ($file -ne $version) { throw "zunimi-studio.exe in the zip is $file, not $version" }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - run: choco install innosetup -y --no-progress
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = (Resolve-Path "$env:SystemDrive\Program Files*\Inno Setup *\ISCC.exe" | Select-Object -First 1).Path
+          if (-not $iscc) { throw "Inno Setup was not found" }
+          & $iscc "/DAppVersion=$env:VERSION" "/DStageDir=$env:STAGE" installer.iss
+          if ($LASTEXITCODE) { throw "ISCC failed" }
+
+      - name: Attach it to the release
+        shell: pwsh
+        run: gh release upload $env:TAG installer\ZunimiStudio-Setup.exe --clobber

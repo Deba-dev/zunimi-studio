@@ -261,7 +261,20 @@ QWidget *SettingsDialog::aboutTab()
 	encoders << "x264";
 	auto *title = new QLabel(QString("%1 %2").arg(ZUNIMI_NAME, ZUNIMI_VERSION));
 	title->setObjectName("h2");
-	layout->addWidget(title);
+	auto *check = new QPushButton("Check for updates");
+	check->setCursor(Qt::PointingHandCursor);
+	connect(check, &QPushButton::clicked, this, [this] {
+		if (checkUpdates)
+			checkUpdates();
+	});
+	auto *head = new QHBoxLayout;
+	head->addWidget(title, 1);
+	head->addWidget(check);
+	layout->addLayout(head);
+	m_autoUpdate = new QCheckBox("Check for updates when Zunimi Studio starts");
+	m_autoUpdate->setChecked(Settings::get().value("update/auto", true).toBool());
+	layout->addWidget(m_autoUpdate);
+	layout->addSpacing(8);
 	layout->addWidget(hint(QString("Processor threads: %1\nMemory: %2 GB\nGraphics: %3\nEncoders: %4\n"
 				       "Auto-Tune choice: %5")
 				       .arg(hw.cores)
@@ -286,6 +299,7 @@ void SettingsDialog::save()
 	s.set("preview/pauseWhileLive", m_pausePreview->isChecked());
 	s.set("tray/close", m_closeTray->isChecked());
 	s.set("tray/esc", m_escTray->isChecked());
+	s.set("update/auto", m_autoUpdate->isChecked());
 	m_modes->syncTray();
 	if (m_mode->currentData().toString() != m_modes->mode())
 		m_modes->setMode(m_mode->currentData().toString());

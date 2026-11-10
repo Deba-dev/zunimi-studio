@@ -2,6 +2,8 @@
 #include <QElapsedTimer>
 #include <QMainWindow>
 
+#include "core/Updater.h"
+
 #include <obs.h>
 
 class ObsCore;
@@ -21,6 +23,7 @@ class MainWindow : public QMainWindow {
 public:
 	explicit MainWindow(ObsCore *core);
 	WindowModes *modes() const { return m_modes; }
+	void checkForUpdates();
 
 protected:
 	void keyPressEvent(QKeyEvent *event) override;
@@ -33,6 +36,9 @@ private:
 	QWidget *buildBottomBar();
 	QWidget *audioControl(const QString &label, obs_source_t *source, const QString &key);
 	void buildTray();
+	QWidget *buildUpdateBar();
+	void showUpdate(const QString &text, const QString &go, const QString &later);
+	void updateClicked();
 
 	void addSource(const QString &kind);
 	bool pick(obs_source_t *source, const char *property, const QString &title);
@@ -68,4 +74,12 @@ private:
 	QElapsedTimer m_liveSince;
 	bool m_previewWanted = true;
 	bool m_shown = false;
+
+	Updater *m_updater = nullptr;
+	UpdateInfo m_update;
+	QString m_installer;
+	QWidget *m_updateBar = nullptr;
+	QLabel *m_updateText = nullptr;
+	QPushButton *m_updateGo = nullptr;
+	QPushButton *m_updateLater = nullptr;
 };

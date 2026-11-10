@@ -29,6 +29,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -113,6 +114,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	m_banner->setWordWrap(true);
 	m_banner->hide();
 	root->addWidget(m_banner);
+	root->addWidget(buildUpdateBar());
 	root->addWidget(buildBottomBar());
 	setCentralWidget(central);
 	buildTray();
@@ -155,6 +157,108 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 			    .arg(encoderLabel(p.encoder)));
 		s.set("welcome/shown", true);
 	}
+
+	// Updates: a quiet check a little after start, never during a self-test.
+	m_updater = new Updater(this);
+	connect(m_updater, &Updater::found, this, [this](const UpdateInfo &info) {
+		m_update = info;
+		m_installer.clear();
+		showUpdate(QString("<b>Zunimi Studio %1 is out.</b> %2").arg(info.version.toHtmlEscaped(),
+									     info.notes.toHtmlEscaped()),
+			   Updater::installed() ? "Update now" : "Download page", "Later");
+	});
+	connect(m_updater, &Updater::nothing, this,
+		[this] { say(QString("You have the newest version (%1).").arg(ZUNIMI_VERSION)); });
+	connect(m_updater, &Updater::progress, this, [this](double f) {
+		m_updateText->setText(QString("Downloading Zunimi Studio %1... %2%")
+					      .arg(m_update.version.toHtmlEscaped())
+					      .arg(int(f * 100)));
+	});
+	connect(m_updater, &Updater::ready, this, [this](const QString &path) {
+		m_installer = path;
+		showUpdate(QString("<b>Zunimi Studio %1 is ready to install.</b> It takes a few seconds and opens "
+				   "again by itself.")
+				   .arg(m_update.version.toHtmlEscaped()),
+			   "Restart and update", "Later");
+	});
+	connect(m_updater, &Updater::failed, this, [this](const QString &reason) {
+		if (m_update.version.isEmpty())
+			say(reason, true);
+		else
+			showUpdate(reason.toHtmlEscaped(), "Try again", "Close");
+	});
+	const QString leftover = m_updater->afterStart();
+	if (!leftover.isEmpty())
+		say(leftover, true);
+	const QStringList args = QCoreApplication::arguments();
+	const bool selftest = std::any_of(args.begin(), args.end(), [](const QString &a) { return a.startsWith("--selftest"); });
+	if (!selftest && s.value("update/auto", true).toBool())
+		QTimer::singleShot(8000, m_updater, [this] { m_updater->check(false); });
+}
+
+void MainWindow::checkForUpdates()
+{
+	m_updater->check(true);
+}
+
+QWidget *MainWindow::buildUpdateBar()
+{
+	auto *row = new QHBoxLayout;
+	row->setContentsMargins(14, 8, 10, 8);
+	row->setSpacing(10);
+	m_updateText = new QLabel;
+	m_updateText->setWordWrap(true);
+	m_updateText->setTextFormat(Qt::RichText);
+	m_updateGo = button("Update now", "primary");
+	m_updateLater = button("Later");
+	connect(m_updateGo, &QPushButton::clicked, this, &MainWindow::updateClicked);
+	connect(m_updateLater, &QPushButton::clicked, this, [this] {
+		m_updater->cancel();
+		m_updateBar->hide();
+	});
+	row->addWidget(m_updateText, 1);
+	row->addWidget(m_updateGo);
+	row->addWidget(m_updateLater);
+	m_updateBar = panel(row);
+	m_updateBar->setStyleSheet(QString("QWidget#panel { border-color: %1; }").arg(Theme::Accent.name()));
+	m_updateBar->hide();
+	return m_updateBar;
+}
+
+void MainWindow::showUpdate(const QString &text, const QString &go, const QString &later)
+{
+	m_updateText->setText(text);
+	m_updateGo->setText(go);
+	m_updateGo->setEnabled(true);
+	m_updateLater->setText(later);
+	m_updateBar->show();
+}
+
+void MainWindow::updateClicked()
+{
+	if (!Updater::installed()) { // the zip build cannot replace itself
+		QDesktopServices::openUrl(QUrl(m_update.page));
+		m_updateBar->hide();
+		return;
+	}
+	if (!quitWouldStop().isEmpty()) {
+		say("Finish your stream or recording first: updating restarts Zunimi Studio.", true);
+		return;
+	}
+	if (m_installer.isEmpty()) {
+		m_updateGo->setEnabled(false);
+		m_updateLater->setText("Cancel");
+		m_updateText->setText(QString("Downloading Zunimi Studio %1...").arg(m_update.version.toHtmlEscaped()));
+		m_updater->download(m_update);
+		return;
+	}
+	if (!m_updater->launch(m_installer)) {
+		showUpdate("The installer could not be started. Try again, or download it from the release page.",
+			   "Try again", "Close");
+		m_installer.clear();
+		return;
+	}
+	m_modes->quit();
 }
 
 // ---- layout
@@ -546,6 +650,7 @@ void MainWindow::updateButtons()
 void MainWindow::openSettings(int tab)
 {
 	SettingsDialog dialog(m_core, m_modes, this);
+	dialog.checkUpdates = [this] { checkForUpdates(); };
 	dialog.openTab(SettingsDialog::Tab(tab));
 	if (dialog.exec() == QDialog::Accepted) {
 		say("Settings saved.");

@@ -1,5 +1,6 @@
 #include "core/ObsCore.h"
 #include "core/Settings.h"
+#include "core/Updater.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 #include "ui/WindowModes.h"
@@ -110,6 +111,28 @@ int main(int argc, char *argv[])
 					QTimer::singleShot(500, [&window] { window.modes()->quit(); });
 				}
 			});
+		}
+		if (app.arguments().contains("--selftest-update")) {
+			// Checks the link rules, then asks GitHub for releases and logs what it finds. Run with ZUNIMI_DATA set.
+			const bool rules =
+				Updater::isReleaseAsset("https://github.com/Deba-dev/zunimi-studio/releases/download/v1.0.0/ZunimiStudio-Setup.exe") &&
+				!Updater::isReleaseAsset("https://github.com/someone/else/releases/download/v1/x-Setup.exe") &&
+				!Updater::isReleaseAsset("http://github.com/Deba-dev/zunimi-studio/releases/download/v1/x-Setup.exe") &&
+				!Updater::isReleaseAsset("https://github.com/Deba-dev/zunimi-studio/releases/download/../../x/Setup.exe") &&
+				Updater::parseVersion("v0.10.1") > Updater::parseVersion("0.9.9") &&
+				Updater::parseVersion("V1.2") == QList<int>({1, 2, 0, 0});
+			blog(rules ? LOG_INFO : LOG_ERROR, "selftest update: link and version rules %s", rules ? "ok" : "FAILED");
+			auto *updater = new Updater(&app);
+			const auto done = [&window](const QString &what) {
+				blog(LOG_INFO, "selftest update: %s", what.toUtf8().constData());
+				QTimer::singleShot(200, [&window] { window.modes()->quit(); });
+			};
+			QObject::connect(updater, &Updater::found, &app, [done](const UpdateInfo &i) {
+				done("found " + i.version + " " + i.asset + " " + i.digest);
+			});
+			QObject::connect(updater, &Updater::nothing, &app, [done] { done("no newer version"); });
+			QObject::connect(updater, &Updater::failed, &app, [done](const QString &r) { done("failed: " + r); });
+			updater->check(true);
 		}
 		code = app.exec();
 	}

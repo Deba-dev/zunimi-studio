@@ -1,23 +1,18 @@
-## Zunimi Studio 0.1.0 (preview)
+## Zunimi Studio 0.1.1 (preview)
 
-This is the first working build: a light streaming and recording studio for Windows, built on the OBS engine.
+Zunimi Studio now has a real installer and updates itself.
 
-**Install:** unzip anywhere and double-click **Start Zunimi Studio.cmd**. Nothing else is needed. Windows 10/11, 64-bit, and a DirectX 11 graphics card.
+**Install:** download **ZunimiStudio-Setup.exe** below and run it. It installs just for you, so no admin prompt. Windows 10/11, 64-bit, and a DirectX 11 graphics card. If Windows SmartScreen warns you, click **More info > Run anyway** (the installer isn't code-signed yet).
 
-### What's in it
-- **Auto-Tune:** on first launch it checks your PC and picks Potato (720p30), Balanced or Ultra (1080p60). You can change everything in Settings.
-- **Sources:** Game (captures whichever game is fullscreen), Screen, Window, Webcam, Image, Text.
-- **Audio:** desktop and mic volume and mute, plus a light mic noise clean-up.
-- **Go Live:** Twitch, YouTube, Kick or any RTMP server. Your stream key is encrypted, and the stream reconnects after an internet drop.
-- **Record:** MP4 files that survive a crash or power cut.
-- **Hardware encoders first:** NVIDIA, AMD or Intel. If one fails to start, the app falls back to the CPU encoder.
-- **Health bar:** tells you in plain words when your GPU, encoder or internet is struggling.
-- **Low-end friendly:** only the parts it needs are loaded, the preview pauses while hidden, and Potato uses lighter encoder settings.
-- **Window:** Windowed, Borderless or Fullscreen (F11). Esc and the close button send it to the tray, and you can turn each off.
+### New
+- **Installer:** Start menu entry, desktop shortcut and a normal uninstall from Windows Settings. Your settings, scene and recordings are kept when you update or uninstall.
+- **Updates:** a few seconds after start, Zunimi Studio checks for a newer version. If there is one, a bar offers **Update now**: it downloads the installer, checks it is genuine and complete, installs it and reopens. You can't update while you're live or recording. Turn the check off, or check by hand, in **Settings > About this PC**.
+- **Cleans up after itself:** downloaded installers are deleted after the update, and an update replaces the old program files instead of mixing them.
 
-### Known limits
+### Still in this preview
 - **Game capture and anti-cheat (Valorant/Vanguard and others):** this build's capture hook is unsigned and may be blocked. Use **Screen** capture for those games until the signed hook ships.
-- There's no installer or auto-update yet, and only one scene.
+- Only one scene so far.
+- Coming from 0.1.0 (the zip)? Install this once with the Setup .exe. From now on the app updates itself. You can delete the old unzipped folder.
 
 ### Source
-Zunimi Studio is free software under the GPL-2.0-or-later. It uses libobs from [OBS Studio 33.0.1](https://github.com/obsproject/obs-studio/tree/33.0.1), built with `scripts/build-obs.ps1` in this repo.
+Zunimi Studio is free software under the GPL-2.0-or-later. It uses libobs from [OBS Studio 33.0.1](https://github.com/obsproject/obs-studio/tree/33.0.1), built with `scripts/build-obs.ps1` in this repo. A portable zip is attached too.

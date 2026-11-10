@@ -42,8 +42,8 @@ Copy-Item "$($deps.FullName)\bin\*.dll" $bin -Exclude lua51.dll -Force
 
 # Qt: only what the app uses
 $qt = Get-ChildItem "$ObsSource\.deps" -Directory -Filter "obs-deps-qt6-*-x64" | Select-Object -First 1
-foreach ($dll in "Qt6Core","Qt6Gui","Qt6Widgets") { Copy-Item "$($qt.FullName)\bin\$dll.dll" $bin -Force }
-foreach ($plugin in "platforms\qwindows.dll","styles\qmodernwindowsstyle.dll","imageformats\qjpeg.dll","imageformats\qico.dll") {
+foreach ($dll in "Qt6Core","Qt6Gui","Qt6Widgets","Qt6Network") { Copy-Item "$($qt.FullName)\bin\$dll.dll" $bin -Force }
+foreach ($plugin in "platforms\qwindows.dll","styles\qmodernwindowsstyle.dll","imageformats\qjpeg.dll","imageformats\qico.dll","tls\qschannelbackend.dll") {
     $src = Join-Path "$($qt.FullName)\plugins" $plugin
     if (Test-Path $src) {
         $dst = Join-Path $bin (Split-Path $plugin -Parent)
