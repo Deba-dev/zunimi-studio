@@ -1,0 +1,3 @@
+#pragma once
+#define ZUNIMI_NAME "Zunimi Studio"
+#define ZUNIMI_VERSION "@PROJECT_VERSION@"
