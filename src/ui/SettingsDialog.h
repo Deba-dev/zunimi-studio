@@ -18,7 +18,7 @@ class QKeySequenceEdit;
 class SettingsDialog : public QDialog {
 	Q_OBJECT
 public:
-	enum Tab { Stream, Video, Recording, Hotkeys, Window, About };
+	enum Tab { Stream, Video, Recording, Audio, Connections, Automation, Hotkeys, Window, About };
 	SettingsDialog(ObsCore *core, WindowModes *modes, QWidget *parent);
 	void openTab(Tab tab);
 	std::function<void()> checkUpdates; // set by the main window
@@ -27,6 +27,9 @@ private:
 	QWidget *streamTab();
 	QWidget *videoTab();
 	QWidget *recordingTab();
+	QWidget *audioTab();
+	QWidget *connectionsTab();
+	QWidget *automationTab();
 	QWidget *hotkeysTab();
 	QWidget *windowTab();
 	QWidget *aboutTab();
@@ -42,6 +45,17 @@ private:
 	QLineEdit *m_server, *m_key, *m_folder;
 	QSpinBox *m_bitrate;
 	QCheckBox *m_pausePreview, *m_closeTray, *m_escTray, *m_autoUpdate, *m_autoHeal, *m_replayAuto;
+	QCheckBox *m_escAsk, *m_autoRecord, *m_tracks[6];
+	QComboBox *m_codec, *m_rate, *m_preset, *m_format, *m_recQuality, *m_recCodec, *m_monitor, *m_streamTrack;
+	QSpinBox *m_quality, *m_keyint, *m_delay, *m_splitMinutes, *m_splitMb, *m_audioKbps;
+	QLineEdit *m_nameFormat;
+	QLineEdit *m_twitchChannel, *m_youtube, *m_kick, *m_kickRoom, *m_seJwt, *m_slToken, *m_twitchClient;
+	QComboBox *m_currency;
+	QLabel *m_twitchLogin;
+	class QTableWidget *m_destinations, *m_rules;
+	QCheckBox *m_autoOn, *m_privacyOn, *m_privacyLive, *m_blackAlarm, *m_preflight, *m_report;
+	QSpinBox *m_micMinutes;
+	class QPlainTextEdit *m_patterns;
 	QSpinBox *m_replaySeconds;
 	QList<QPair<QString, QKeySequenceEdit *>> m_keys;
 	QLabel *m_serverHint, *m_profileHint;

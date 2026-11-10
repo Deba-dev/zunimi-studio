@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(ZunimiStudio VERSION 0.2.0 LANGUAGES C CXX)
+project(ZunimiStudio VERSION 0.3.0 LANGUAGES C CXX)
 
 # Zunimi Studio links against a libobs built from the OBS source with the "zunimi" preset
 # (see scripts/build-obs.ps1). Everything lives on D: by default; override these on the command line.
@@ -29,12 +29,22 @@ add_executable(zunimi-studio WIN32
   src/core/Settings.cpp src/core/Settings.h
   src/core/Hardware.cpp src/core/Hardware.h
   src/core/ObsCore.cpp src/core/ObsCore.h
+  src/core/Editing.cpp src/core/Outputs.cpp src/core/Collections.cpp
+  src/core/Assist.cpp src/core/Assist.h
+  src/core/Addons.cpp src/core/Addons.h
+  src/core/Vertical.cpp
   src/core/Updater.cpp src/core/Updater.h
   src/ui/Theme.cpp src/ui/Theme.h
   src/ui/PreviewWidget.cpp src/ui/PreviewWidget.h
   src/ui/WindowModes.cpp src/ui/WindowModes.h
   src/ui/SettingsDialog.cpp src/ui/SettingsDialog.h
   src/ui/MainWindow.cpp src/ui/MainWindow.h
+  src/ui/Dialogs.cpp src/ui/Dialogs.h
+  src/ui/AlertDesigner.cpp src/ui/AlertDesigner.h
+  src/ui/LivePanels.cpp src/ui/LivePanels.h
+  src/net/WebSocket.cpp src/net/WebSocket.h
+  src/events/Events.cpp src/events/Events.h
+  src/overlays/Overlays.cpp src/overlays/Overlays.h
   src/ui/PropertiesView.cpp src/ui/PropertiesView.h
   src/ui/FiltersDialog.cpp src/ui/FiltersDialog.h
   src/ui/Mixer.cpp src/ui/Mixer.h
@@ -43,7 +53,7 @@ add_executable(zunimi-studio WIN32
   resources/app.rc)
 
 target_include_directories(zunimi-studio PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(zunimi-studio PRIVATE Qt6::Widgets Qt6::Network libobs crypt32 dxgi)
+target_link_libraries(zunimi-studio PRIVATE Qt6::Widgets Qt6::Network libobs crypt32 dxgi sapi ole32 dbghelp)
 target_compile_definitions(zunimi-studio PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_options(zunimi-studio PRIVATE /W3 /utf-8 /permissive- /Zc:__cplusplus)
 

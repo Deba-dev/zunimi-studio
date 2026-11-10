@@ -189,9 +189,14 @@ QWidget *Mixer::channel(obs_source_t *source)
 	filters->setObjectName("icon");
 	filters->setCursor(Qt::PointingHandCursor);
 	filters->setToolTip("Noise gate, compressor, gain, EQ...");
+	auto *more = new QPushButton("⋯");
+	more->setObjectName("icon");
+	more->setCursor(Qt::PointingHandCursor);
+	more->setToolTip("Listen in headphones, sync offset, balance, recording tracks");
 	head->addWidget(label, 1);
 	head->addWidget(mute);
 	head->addWidget(filters);
+	head->addWidget(more);
 
 	auto *meter = new LevelMeter(source);
 	m_meters.push_back(meter);
@@ -232,6 +237,7 @@ QWidget *Mixer::channel(obs_source_t *source)
 			m_core->save();
 	});
 	connect(filters, &QPushButton::clicked, this, [this, ref] { emit filtersRequested(ref); });
+	connect(more, &QPushButton::clicked, this, [this, ref] { emit audioRequested(ref); });
 
 	col->addLayout(head);
 	col->addWidget(meter);

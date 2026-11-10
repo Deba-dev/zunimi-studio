@@ -6,6 +6,7 @@
 
 #include "core/Updater.h"
 
+class Assist;
 class Hotkeys;
 class Mixer;
 class ObsCore;
@@ -41,26 +42,48 @@ private:
 	QWidget *buildUpdateBar();
 	void buildTray();
 	void fillAddMenu(QMenu *menu);
+	void fillMainMenu(QMenu *menu);
+	void fillCollectionsMenu(QMenu *menu);
+	void fillProfilesMenu(QMenu *menu);
+	void fillProjectorMenu(QMenu *menu, obs_source_t *source);
 
 	// scenes
 	void refreshScenes();
 	void renameScene();
+	void sceneMenu(const QPoint &global);
+	void chooseTransition();
+	void updateStudio();
+	void updateCanvasSwitch();
+	void verticalSettings();
+	void importCollection();
+	void importFromObs();
 	// sources
 	void refreshSources();
 	void addSource(const QString &kind);
 	void addScreen(const QString &id, const QString &label);
 	void addAllScreens();
+	void addOverlay(const QString &kind);
+	void addBrowser(bool overlayLink);
+	bool ensureBrowser();
+	void restartApp();
 	QString selectedSource() const;
 	void selectSource(const QString &name);
 	void sourceMenu(const QString &name, const QPoint &global);
 	void openProperties(const QString &name, bool justAdded = false);
 	void openFilters(obs_source_t *source);
 	void renameSource(const QString &name);
+	void openTransform(const QString &name);
+	void openAudio(obs_source_t *source);
+	void openProjector(obs_source_t *source, int screen);
+	void screenshot(obs_source_t *source = nullptr);
 	// outputs
 	void toggleStream();
+	bool preflightOk();
 	void toggleRecord();
 	void toggleReplay();
 	void saveReplay();
+	void togglePause();
+	void toggleVirtualCam();
 	void hotkey(const QString &action);
 	void applyHotkeys();
 	void openSettings(int tab = 0);
@@ -74,9 +97,17 @@ private:
 	void updateClicked();
 
 	ObsCore *m_core;
+	Assist *m_assist = nullptr;
+	QPushButton *m_fix = nullptr;
+	QString m_fixId;
 	WindowModes *m_modes;
 	Hotkeys *m_hotkeys;
 	PreviewWidget *m_preview = nullptr;
+	PreviewWidget *m_program = nullptr;     // studio mode: what is on air
+	QWidget *m_programBox = nullptr;
+	QLabel *m_previewTitle = nullptr;
+	QWidget *m_canvasSwitch = nullptr;
+	QPushButton *m_landscapeButton = nullptr, *m_verticalButton = nullptr;
 	QStackedWidget *m_previewStack = nullptr;
 	QListWidget *m_scenes = nullptr;
 	QComboBox *m_transition = nullptr;
@@ -94,9 +125,12 @@ private:
 	QPushButton *m_rec = nullptr;
 	QPushButton *m_replay = nullptr;
 	QPushButton *m_saveReplay = nullptr;
+	QPushButton *m_pause = nullptr;
+	QPushButton *m_vcam = nullptr;
 	QAction *m_trayLive = nullptr;
 	QAction *m_trayRec = nullptr;
 	QAction *m_trayReplay = nullptr;
+	bool m_pttMuted = false; // the mic's mute before push-to-talk/mute took over
 	QTimer *m_ticker = nullptr;
 	QTimer *m_bannerTimer = nullptr;
 	QElapsedTimer m_liveSince;

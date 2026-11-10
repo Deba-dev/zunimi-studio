@@ -4,6 +4,8 @@
 
 #include <QAbstractSpinBox>
 #include <QApplication>
+#include <QCheckBox>
+#include <QPushButton>
 #include <QCloseEvent>
 #include <QCursor>
 #include <QKeyEvent>
@@ -276,7 +278,33 @@ bool WindowModes::handleKey(QKeyEvent *event)
 		toggleFullscreen();
 		return true;
 	}
-	return Settings::get().value("tray/esc", true).toBool() && hideToTray();
+	if (!Settings::get().value("tray/esc", true).toBool())
+		return false;
+	// An accidental Esc must never make the app vanish: ask first (Cancel is the default, so a second Esc or
+	// Enter keeps everything as it is). "Don't ask again" turns the question off.
+	if (!Settings::get().value("tray/escAsk", true).toBool())
+		return hideToTray();
+	QMessageBox box(m_window);
+	box.setWindowTitle(m_name);
+	box.setIcon(QMessageBox::Question);
+	box.setText("Hide " + m_name + " to the tray?");
+	box.setInformativeText("It keeps running (a stream or recording carries on). Click the tray icon to open it again.");
+	QPushButton *hide = box.addButton("Hide to tray", QMessageBox::AcceptRole);
+	QPushButton *quitApp = box.addButton("Quit", QMessageBox::DestructiveRole);
+	QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+	box.setDefaultButton(cancel);
+	box.setEscapeButton(cancel);
+	auto *never = new QCheckBox("Don't ask again when I press Esc");
+	box.setCheckBox(never);
+	box.exec();
+	if (box.clickedButton() == hide) {
+		if (never->isChecked())
+			Settings::get().set("tray/escAsk", false);
+		hideToTray();
+	} else if (box.clickedButton() == quitApp) {
+		quit(busy && !busy().isEmpty()); // they already chose Quit; ask again only when it would end a stream or recording
+	}
+	return true;
 }
 
 void WindowModes::syncTray()
@@ -320,10 +348,11 @@ bool WindowModes::hideToTray()
 bool WindowModes::confirm()
 {
 	const QString why = busy ? busy() : QString();
-	if (why.isEmpty())
-		return true;
 	showAgain();
-	return QMessageBox::question(m_window, m_name, why + "\n\nQuit " + m_name + " anyway?") == QMessageBox::Yes;
+	// Quitting always asks, so a stray click or key never closes the app. No is the default.
+	const QString text = why.isEmpty() ? "Quit " + m_name + "?" : why + "\n\nQuit " + m_name + " anyway?";
+	return QMessageBox::question(m_window, m_name, text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) ==
+	       QMessageBox::Yes;
 }
 
 bool WindowModes::closeEvent(QCloseEvent *event)
@@ -343,9 +372,16 @@ bool WindowModes::closeEvent(QCloseEvent *event)
 	return false;
 }
 
-void WindowModes::quit()
+void WindowModes::notify(const QString &text)
 {
-	if (!confirm())
+	if (m_tray && m_tray->isVisible())
+		m_tray->showMessage(m_name, text, QSystemTrayIcon::Warning, 8000);
+	QApplication::alert(m_window); // the taskbar button flashes
+}
+
+void WindowModes::quit(bool ask)
+{
+	if (ask && !confirm())
 		return;
 	m_quitting = true;
 	m_window->close();

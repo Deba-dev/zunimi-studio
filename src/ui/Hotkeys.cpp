@@ -3,6 +3,7 @@
 #include "core/Settings.h"
 
 #include <QCoreApplication>
+#include <QTimer>
 
 #include <windows.h>
 
@@ -59,6 +60,14 @@ QVector<Hotkeys::Action> Hotkeys::actions()
 		{"replay_toggle", "Replay buffer on / off"},
 		{"mic_mute", "Mute / unmute mic"},
 		{"desktop_mute", "Mute / unmute desktop audio"},
+		{"ptt", "Push to talk (mic on while held)"},
+		{"ptm", "Push to mute (mic off while held)"},
+		{"record_pause", "Pause / resume recording"},
+		{"screenshot", "Screenshot"},
+		{"studio_go", "Studio mode: send preview live"},
+		{"vcam", "Virtual camera on / off"},
+		{"undo", "Undo last change"},
+		{"mark", "Mark moment (chapter + saved replay)"},
 	};
 	for (int i = 1; i <= 9; i++)
 		list.append({QString("scene_%1").arg(i), QString("Switch to scene %1").arg(i)});
@@ -76,6 +85,15 @@ bool Hotkeys::supported(const QKeySequence &keys)
 Hotkeys::Hotkeys(QObject *parent) : QObject(parent)
 {
 	QCoreApplication::instance()->installNativeEventFilter(this);
+	m_hold = new QTimer(this);
+	m_hold->setInterval(30);
+	connect(m_hold, &QTimer::timeout, this, [this] {
+		if (GetAsyncKeyState(int(m_heldKey)) & 0x8000)
+			return;
+		m_hold->stop();
+		emit triggered(m_held + ":up");
+		m_held.clear();
+	});
 }
 
 Hotkeys::~Hotkeys()
@@ -90,6 +108,7 @@ void Hotkeys::clear()
 		if (!m_registered[i].isEmpty())
 			UnregisterHotKey(nullptr, BASE_ID + i);
 	m_registered.clear();
+	m_keys.clear();
 }
 
 QStringList Hotkeys::apply()
@@ -98,6 +117,7 @@ QStringList Hotkeys::apply()
 	QStringList failed;
 	const QVector<Action> list = actions();
 	m_registered.resize(list.size());
+	m_keys.resize(list.size());
 	for (int i = 0; i < list.size(); i++) {
 		const QKeySequence keys(Settings::get().value("hotkeys/" + list[i].id).toString());
 		if (!supported(keys))
@@ -114,8 +134,11 @@ QStringList Hotkeys::apply()
 		if (mods & Qt::MetaModifier)
 			flags |= MOD_WIN;
 		const UINT vk = virtualKey(int(combo.key()), mods & Qt::KeypadModifier);
-		if (RegisterHotKey(nullptr, BASE_ID + i, flags, vk))
+		const bool hold = list[i].id == "ptt" || list[i].id == "ptm";
+		if (RegisterHotKey(nullptr, BASE_ID + i, hold ? flags & ~UINT(MOD_NOREPEAT) : flags, vk)) {
 			m_registered[i] = list[i].id;
+			m_keys[i] = vk;
+		}
 		else
 			failed << QString("%1 (%2)").arg(list[i].label, keys.toString(QKeySequence::NativeText));
 	}
@@ -130,6 +153,16 @@ bool Hotkeys::nativeEventFilter(const QByteArray &, void *message, qintptr *)
 	const int index = int(msg->wParam) - BASE_ID;
 	if (index < 0 || index >= m_registered.size() || m_registered[index].isEmpty())
 		return false;
-	emit triggered(m_registered[index]);
+	const QString id = m_registered[index];
+	if (id == "ptt" || id == "ptm") {
+		if (m_held == id)
+			return true; // key repeat while held
+		m_held = id;
+		m_heldKey = m_keys[index];
+		emit triggered(id + ":down");
+		m_hold->start();
+		return true;
+	}
+	emit triggered(id);
 	return true;
 }

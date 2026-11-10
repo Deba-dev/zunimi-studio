@@ -133,7 +133,7 @@ void Updater::check(bool manual)
 			for (const QJsonValue &a : release["assets"].toArray()) {
 				const QJsonObject asset = a.toObject();
 				const QString link = asset["browser_download_url"].toString();
-				if (!asset["name"].toString().endsWith("setup.exe", Qt::CaseInsensitive) ||
+				if (asset["name"].toString().compare("ZunimiStudio-Setup.exe", Qt::CaseInsensitive) != 0 || // not the browser add-on
 				    !isReleaseAsset(link))
 					continue;
 				best.version = release["tag_name"].toString().remove(QRegularExpression("^[vV]"));

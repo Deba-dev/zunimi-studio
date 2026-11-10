@@ -95,13 +95,57 @@ VideoPlan planFor(Profile profile, const Hardware &hw)
 
 QString encoderLabel(const QString &id)
 {
-	if (id == "obs_nvenc_h264_tex")
+	if (id.startsWith("obs_nvenc"))
 		return "NVIDIA NVENC";
-	if (id == "h264_texture_amf")
+	if (id.contains("_amf"))
 		return "AMD AMF";
-	if (id == "obs_qsv11_v2")
+	if (id.startsWith("obs_qsv11"))
 		return "Intel QuickSync";
 	return "x264 (CPU)";
+}
+
+namespace {
+QString variant(const QString &family, const QString &codec)
+{
+	if (codec == "hevc") {
+		if (family == "obs_nvenc_h264_tex")
+			return "obs_nvenc_hevc_tex";
+		if (family == "h264_texture_amf")
+			return "h265_texture_amf";
+		if (family == "obs_qsv11_v2")
+			return "obs_qsv11_hevc";
+	} else if (codec == "av1") {
+		if (family == "obs_nvenc_h264_tex")
+			return "obs_nvenc_av1_tex";
+		if (family == "h264_texture_amf")
+			return "av1_texture_amf";
+		if (family == "obs_qsv11_v2")
+			return "obs_qsv11_av1";
+	}
+	return {};
+}
+} // namespace
+
+bool codecAvailable(const QString &family, const QString &codec)
+{
+	if (codec == "h264" || codec.isEmpty())
+		return true;
+	const QString id = variant(family, codec);
+	return !id.isEmpty() && hasEncoder(id.toUtf8().constData());
+}
+
+QString encoderFor(const QString &family, const QString &codec)
+{
+	return codecAvailable(family, codec) && codec != "h264" && !codec.isEmpty() ? variant(family, codec) : family;
+}
+
+QString codecLabel(const QString &codec)
+{
+	if (codec == "hevc")
+		return "HEVC (H.265)";
+	if (codec == "av1")
+		return "AV1";
+	return "H.264";
 }
 
 QString profileName(Profile profile)

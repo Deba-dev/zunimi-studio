@@ -29,6 +29,10 @@ Profile pickProfile(const Hardware &hw);
 VideoPlan planFor(Profile profile, const Hardware &hw);
 QString bestEncoder(const Hardware &hw);
 QString encoderLabel(const QString &id);
+// The family's encoder for a codec ("h264", "hevc", "av1"); the H.264 one when this PC can't do that codec.
+QString encoderFor(const QString &family, const QString &codec);
+bool codecAvailable(const QString &family, const QString &codec);
+QString codecLabel(const QString &codec);
 QString profileName(Profile profile);
 QString profileKey(Profile profile);
 Profile profileFromKey(const QString &key);

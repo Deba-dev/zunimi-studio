@@ -9,7 +9,8 @@ param(
     [string]$Config = "RelWithDebInfo",
     [switch]$Run,
     [switch]$Package,
-    [switch]$Icon
+    [switch]$Icon,
+    [switch]$Browser  # also put the browser source add-on into build\stage (for trying it locally)
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
@@ -42,11 +43,26 @@ Copy-Item "$ObsInstall\bin\64bit\*" $bin -Include *.dll, obs-ffmpeg-mux.exe, obs
 Copy-Item "$ObsInstall\data" $stage -Recurse -Force
 # only the modules Zunimi loads (keep in sync with CORE_MODULES in src/core/ObsCore.cpp)
 $modules = "image-source","obs-ffmpeg","obs-filters","obs-nvenc","obs-outputs","obs-qsv11","obs-text",
-           "obs-transitions","obs-x264","rtmp-services","win-capture","win-dshow","win-wasapi"
+           "obs-transitions","obs-x264","rtmp-services","win-capture","win-dshow","win-wasapi","obs-webrtc"
 $core = Join-Path $stage "core"
 if (Test-Path $core) { Remove-Item $core -Recurse -Force }
 foreach ($m in $modules) { Copy-Item "$ObsInstall\core\$m" (Join-Path $core $m) -Recurse -Force }
 Get-ChildItem $stage -Recurse -Filter *.pdb | Where-Object { $_.Name -notin "obs.pdb","zunimi-studio.pdb" } | Remove-Item
+
+# The browser source (Chromium, ~300 MB) is an add-on: build\addon-browser\core\obs-browser, zipped by -Package as
+# ZunimiStudio-BrowserAddon-<version>.zip and downloaded by the app only when someone wants a browser source.
+$browserSrc = "$ObsSource\build_zunimi\rundir\$Config\core\obs-browser"
+$addon = Join-Path $build "addon-browser"
+if (Test-Path "$browserSrc\obs-browser.dll") {
+    if (Test-Path $addon) { Remove-Item $addon -Recurse -Force }
+    $dst = Join-Path $addon "core\obs-browser"
+    New-Item -ItemType Directory -Force $dst | Out-Null
+    Copy-Item "$browserSrc\*" $dst -Recurse -Force -Exclude *.pdb
+    Get-ChildItem $dst -Recurse -Filter *.pdb | Remove-Item
+    # Chromium's own UI languages: only the ones Zunimi's users need (the rest is ~60 MB)
+    Get-ChildItem "$dst\locales" -File | Where-Object { $_.BaseName -notmatch '^(en-US|en-GB|hi)$' } | Remove-Item
+    if ($Browser) { Copy-Item (Join-Path $addon "core\obs-browser") (Join-Path $stage "core\obs-browser") -Recurse -Force }
+}
 
 # FFmpeg, x264, curl, srt and friends
 $deps = Get-ChildItem "$ObsSource\.deps" -Directory -Filter "obs-deps-20*-x64" | Select-Object -First 1
@@ -80,9 +96,12 @@ if ($Package) {
     if (Test-Path (Split-Path $tmp)) { Remove-Item (Split-Path $tmp) -Recurse -Force }
     Copy-Item $stage $tmp -Recurse
     Get-ChildItem $tmp -Recurse -Filter *.pdb | Remove-Item
+    # the browser source ships inside the app (loaded only when someone uses it)
+    if (Test-Path "$addon\core\obs-browser") { Copy-Item "$addon\core\obs-browser" "$tmp\core\obs-browser" -Recurse -Force }
     Copy-Item (Join-Path $root "LICENSE") $tmp
     $zip = Join-Path $build "ZunimiStudio-$version-windows-x64.zip"
     if (Test-Path $zip) { Remove-Item $zip }
     Compress-Archive -Path $tmp -DestinationPath $zip -CompressionLevel Optimal
     Write-Host "Package: $zip ($([math]::Round((Get-Item $zip).Length / 1MB)) MB)"
+
 }

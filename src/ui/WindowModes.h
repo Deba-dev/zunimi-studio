@@ -50,7 +50,8 @@ public:
 	bool handleKey(QKeyEvent *event);
 	bool closeEvent(QCloseEvent *event); // true: the window only hid, or the person kept it open
 	bool hideToTray();
-	void quit();
+	void quit(bool ask = true);
+	void notify(const QString &text); // a Windows notification from the tray icon (when there is one) // ask: confirm first (self-tests and "Restart and update" skip it)
 	void syncTray();
 	void remember();
 

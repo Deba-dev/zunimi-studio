@@ -24,7 +24,8 @@ if (-not (Test-Path $obs)) {
 }
 
 # OBS 33's presets target VS 2026; this preset builds with VS 2022 and leaves out everything Zunimi
-# does not load: OBS's own UI, browser source (CEF), scripting, VST, websocket, capture cards, NVIDIA FX.
+# does not load: OBS's own UI, scripting, VST, websocket, capture cards, NVIDIA FX. The browser source is built
+# (CEF, Chromium, is downloaded by OBS's CMake) but ships as an add-on that Zunimi loads only when switched on.
 @'
 {
   "version": 8,
@@ -36,7 +37,7 @@ if (-not (Test-Path $obs)) {
       "binaryDir": "${sourceDir}/build_zunimi",
       "cacheVariables": {
         "CMAKE_GENERATOR_INSTANCE": "D:/BuildTools",
-        "ENABLE_FRONTEND": false, "ENABLE_BROWSER": false, "ENABLE_SCRIPTING": false,
+        "ENABLE_FRONTEND": false, "ENABLE_BROWSER": true, "ENABLE_BROWSER_PANELS": true, "ENABLE_SCRIPTING": false,
         "ENABLE_AJA": false, "ENABLE_DECKLINK": false, "ENABLE_VST": false, "ENABLE_VLC": false,
         "ENABLE_WEBSOCKET": false, "ENABLE_TEST_INPUT": false, "ENABLE_NVAFX": false, "ENABLE_NVVFX": false
       }

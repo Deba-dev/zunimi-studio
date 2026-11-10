@@ -26,9 +26,13 @@ public:
 	bool nativeEventFilter(const QByteArray &type, void *message, qintptr *result) override;
 
 signals:
-	void triggered(const QString &action);
+	void triggered(const QString &action); // push-to-talk sends "ptt:down" and "ptt:up" (also "ptm")
 
 private:
 	void clear();
 	QVector<QString> m_registered; // index + 1 = the Windows hotkey id
+	QVector<unsigned> m_keys;       // the Windows key of each, for push-to-talk's release
+	class QTimer *m_hold = nullptr;  // watches a held push-to-talk key
+	QString m_held;
+	unsigned m_heldKey = 0;
 };

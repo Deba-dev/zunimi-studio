@@ -52,7 +52,22 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Excludes: "*.pdb,Start Zunimi Studio.
 ; Files from the previous version must not mix with the new ones (an old module DLL could load against a newer libobs).
 ; Settings and recordings are safe: they live in %LOCALAPPDATA%\ZunimiStudio and your Videos folder.
 Type: filesandordirs; Name: "{app}\bin"
-Type: filesandordirs; Name: "{app}\core"
+; Zunimi's modules are replaced (the browser source included: it must match the new libobs).
+Type: filesandordirs; Name: "{app}\core\image-source"
+Type: filesandordirs; Name: "{app}\core\obs-ffmpeg"
+Type: filesandordirs; Name: "{app}\core\obs-filters"
+Type: filesandordirs; Name: "{app}\core\obs-nvenc"
+Type: filesandordirs; Name: "{app}\core\obs-outputs"
+Type: filesandordirs; Name: "{app}\core\obs-qsv11"
+Type: filesandordirs; Name: "{app}\core\obs-text"
+Type: filesandordirs; Name: "{app}\core\obs-transitions"
+Type: filesandordirs; Name: "{app}\core\obs-x264"
+Type: filesandordirs; Name: "{app}\core\rtmp-services"
+Type: filesandordirs; Name: "{app}\core\win-capture"
+Type: filesandordirs; Name: "{app}\core\win-dshow"
+Type: filesandordirs; Name: "{app}\core\win-wasapi"
+Type: filesandordirs; Name: "{app}\core\obs-webrtc"
+Type: filesandordirs; Name: "{app}\core\obs-browser"
 Type: filesandordirs; Name: "{app}\data"
 
 [UninstallDelete]

@@ -40,6 +40,7 @@ public:
 
 signals:
 	void filtersRequested(obs_source_t *source);
+	void audioRequested(obs_source_t *source); // sync, balance, monitoring, tracks
 
 private:
 	QWidget *channel(obs_source_t *source);

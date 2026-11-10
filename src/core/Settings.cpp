@@ -57,6 +57,21 @@ bool Settings::has(const QString &key) const
 	return ini.contains(key);
 }
 
+void Settings::remove(const QString &key)
+{
+	ini.remove(key);
+	ini.sync();
+}
+
+QStringList Settings::keys(const QString &prefix) const
+{
+	QStringList out;
+	for (const QString &k : ini.allKeys())
+		if (k.startsWith(prefix))
+			out << k;
+	return out;
+}
+
 QString Settings::secret(const QString &key) const
 {
 	const QByteArray stored = QByteArray::fromBase64(ini.value(key).toByteArray());
