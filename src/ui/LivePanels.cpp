@@ -1,4 +1,5 @@
 #include "ui/LivePanels.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 #include "events/Events.h"
@@ -26,17 +27,18 @@ QString statusLine()
 {
 	EventHub &hub = EventHub::get();
 	QStringList on, off;
-	static const QHash<QString, QString> names = {{"twitch", "Twitch chat"},       {"twitch_follows", "Twitch follows"},
-						      {"youtube", "YouTube"},          {"kick", "Kick"},
-						      {"streamelements", "StreamElements"}, {"streamlabs", "Streamlabs"}};
+	static const QHash<QString, QString> names = {{"twitch", L("Twitch chat")},       {"twitch_follows", L("Twitch follows")},
+						      {"youtube", L("YouTube")},          {"kick", L("Kick")},
+						      {"streamelements", L("StreamElements")}, {"streamlabs", L("Streamlabs")},
+						      {"relay", L("Kick alerts and Ko-fi")}};
 	for (const QString &s : hub.services()) {
 		const QString st = hub.status(s);
 		if (hub.connected(s))
 			on << names.value(s);
-		else if (!st.isEmpty() && st != "Off" && st != "Not set up")
+		else if (!st.isEmpty() && st != L("Off") && st != L("Not set up"))
 			off << names.value(s) + ": " + st;
 	}
-	QString text = on.isEmpty() ? "Nothing connected yet." : "Connected: " + on.join(", ");
+	QString text = on.isEmpty() ? L("Nothing connected yet.") : L("Connected: ") + on.join(", ");
 	if (!off.isEmpty())
 		text += "\n" + off.join("\n");
 	return text;
@@ -60,10 +62,10 @@ ChatPanel::ChatPanel(QWidget *parent) : QWidget(parent)
 	m_view->setOpenExternalLinks(false);
 	m_view->setStyleSheet("QTextBrowser { background: transparent; border: none; }");
 	m_status = muted({});
-	auto *setup = new QPushButton("Connect chat...");
+	auto *setup = new QPushButton(L("Connect chat..."));
 	connect(setup, &QPushButton::clicked, this, &ChatPanel::setupRequested);
 	m_input = new QLineEdit;
-	m_input->setPlaceholderText("Message to Twitch chat (log in under Connections)");
+	m_input->setPlaceholderText(L("Message to Twitch chat (log in under Connections)"));
 	connect(m_input, &QLineEdit::returnPressed, this, &ChatPanel::send);
 	col->addWidget(m_view, 1);
 	col->addWidget(m_status);
@@ -77,13 +79,13 @@ ChatPanel::ChatPanel(QWidget *parent) : QWidget(parent)
 	show();
 	connect(&EventHub::get(), &EventHub::statusChanged, this, show);
 	connect(&EventHub::get(), &EventHub::chat, this, [this](const ChatMessage &m) {
-		static const QHash<QString, QString> tags = {{"twitch", "<span style='color:#9146FF'>TW</span>"},
-							     {"youtube", "<span style='color:#FF3B3B'>YT</span>"},
-							     {"kick", "<span style='color:#53FC18'>K</span>"}};
+		static const QHash<QString, QString> tags = {{"twitch", L("<span style='color:#9146FF'>TW</span>")},
+							     {"youtube", L("<span style='color:#FF3B3B'>YT</span>")},
+							     {"kick", L("<span style='color:#53FC18'>K</span>")}};
 		const QString color = m.color.isEmpty() ? "#7CC4FF" : m.color;
 		QString badge = m.owner ? "🎙 " : m.mod ? "🛡 " : m.vip ? "💎 " : "";
 		const bool atBottom = m_view->verticalScrollBar()->value() >= m_view->verticalScrollBar()->maximum() - 4;
-		m_view->append(QString("%1 <b style='color:%2'>%3%4</b>&nbsp; %5")
+		m_view->append(QString(L("%1 <b style='color:%2'>%3%4</b>&nbsp; %5"))
 				       .arg(tags.value(m.platform), color, badge.toHtmlEscaped(), m.user.toHtmlEscaped(),
 					    m.text.toHtmlEscaped()));
 		if (++m_lines > 400) { // keep it light
@@ -111,7 +113,7 @@ void ChatPanel::send()
 	connect(reply, &QNetworkReply::finished, this, [this, reply] {
 		reply->deleteLater();
 		if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200)
-			m_status->setText("Twitch didn't take the message. Log in again under Connections.");
+			m_status->setText(L("Twitch didn't take the message. Log in again under Connections."));
 	});
 	m_input->clear();
 }
@@ -122,17 +124,17 @@ EventsPanel::EventsPanel(QWidget *parent) : QWidget(parent)
 	col->setContentsMargins(12, 12, 12, 12);
 	col->setSpacing(8);
 	m_list = new QListWidget;
-	m_list->setToolTip("Double-click an event to show its alert again");
+	m_list->setToolTip(L("Double-click an event to show its alert again"));
 	m_status = muted({});
-	auto *test = new QPushButton("Test an alert");
+	auto *test = new QPushButton(L("Test an alert"));
 	auto *menu = new QMenu(test);
 	for (const QString &t : overlays::alertTypes())
 		menu->addAction(overlays::alertTypeLabel(t), this, [t] { EventHub::get().test(t); });
 	test->setMenu(menu);
-	auto *reset = new QPushButton("Reset counters");
-	reset->setToolTip("Goals, labels and totals start from zero (for example at the start of a stream)");
+	auto *reset = new QPushButton(L("Reset counters"));
+	reset->setToolTip(L("Goals, labels and totals start from zero (for example at the start of a stream)"));
 	connect(reset, &QPushButton::clicked, this, [] { EventHub::get().resetTotals(); });
-	auto *setup = new QPushButton("Connections...");
+	auto *setup = new QPushButton(L("Connections..."));
 	connect(setup, &QPushButton::clicked, this, &EventsPanel::setupRequested);
 	auto *row = new QHBoxLayout;
 	row->addWidget(test);
@@ -159,7 +161,7 @@ void EventsPanel::refresh()
 		if (!e.amountText().isEmpty())
 			line += "  " + e.amountText();
 		if (e.test)
-			line += "  (test)";
+			line += L("  (test)");
 		auto *item = new QListWidgetItem(line);
 		if (!e.message.isEmpty())
 			item->setToolTip(e.message);

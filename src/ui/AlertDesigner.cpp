@@ -1,4 +1,5 @@
 #include "ui/AlertDesigner.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 #include "events/Events.h"
@@ -46,22 +47,22 @@ StreamEvent sample(const QString &type)
 {
 	StreamEvent e;
 	e.type = type;
-	e.user = "PixelNinja";
+	e.user = L("PixelNinja");
 	e.platform = "test";
 	if (type == "tip" || type == "superchat") {
 		e.amount = 500;
 		e.currency = Settings::get().value("events/currency", "INR").toString();
-		e.message = "Bhai kya clutch tha! 🔥";
+		e.message = L("Bhai kya clutch tha! 🔥");
 	} else if (type == "bits") {
 		e.amount = 500;
-		e.message = "Cheer500 GG";
+		e.message = L("Cheer500 GG");
 	} else if (type == "raid") {
 		e.count = 42;
 	} else if (type == "gift") {
 		e.count = 5;
 	} else if (type == "resub") {
 		e.count = 7;
-		e.message = "7 months already!";
+		e.message = L("7 months already!");
 	}
 	return e;
 }
@@ -69,7 +70,7 @@ StreamEvent sample(const QString &type)
 
 AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(parent), m_source(source)
 {
-	setWindowTitle("Alert designer");
+	setWindowTitle(L("Alert designer"));
 	resize(1100, 720);
 	obs_data_t *settings = obs_source_get_settings(source);
 	const QString text = QString::fromUtf8(obs_data_get_string(settings, "design"));
@@ -85,7 +86,7 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 		m_types->addItem(item);
 	}
 	m_theme = new QComboBox;
-	m_theme->addItem("Pick a look for all...", "");
+	m_theme->addItem(L("Pick a look for all..."), "");
 	for (const QString &t : themes())
 		m_theme->addItem(themeLabel(t), t);
 	connect(m_theme, &QComboBox::activated, this, [this] {
@@ -99,13 +100,13 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 	left->addWidget(m_theme);
 
 	// middle: the form
-	m_on = new QCheckBox("Show this alert");
+	m_on = new QCheckBox(L("Show this alert"));
 	m_title = new QLineEdit;
-	m_message = new QCheckBox("Show their message");
+	m_message = new QCheckBox(L("Show their message"));
 	m_image = new QLineEdit;
-	m_image->setPlaceholderText("Empty: a glowing emoji badge");
+	m_image->setPlaceholderText(L("Empty: a glowing emoji badge"));
 	m_sound = new QLineEdit;
-	m_sound->setPlaceholderText("Empty: no sound");
+	m_sound->setPlaceholderText(L("Empty: no sound"));
 	m_volume = new QSpinBox;
 	m_volume->setRange(0, 100);
 	m_volume->setSuffix(" %");
@@ -113,14 +114,14 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 	m_seconds->setRange(2, 60);
 	m_seconds->setSuffix(" s");
 	m_animation = new QComboBox;
-	m_animation->addItem("Pop", "pop");
-	m_animation->addItem("Slide up", "slide");
-	m_animation->addItem("Bounce in", "bounce");
-	m_animation->addItem("Fade", "fade");
+	m_animation->addItem(L("Pop"), "pop");
+	m_animation->addItem(L("Slide up"), "slide");
+	m_animation->addItem(L("Bounce in"), "bounce");
+	m_animation->addItem(L("Fade"), "fade");
 	m_layout = new QComboBox;
-	m_layout->addItem("Picture above the text", "above");
-	m_layout->addItem("Picture beside the text", "side");
-	m_layout->addItem("Text only", "text");
+	m_layout->addItem(L("Picture above the text"), "above");
+	m_layout->addItem(L("Picture beside the text"), "side");
+	m_layout->addItem(L("Text only"), "text");
 	m_font = new QFontComboBox;
 	m_size = new QSpinBox;
 	m_size->setRange(12, 160);
@@ -128,7 +129,7 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 	m_color = new QLineEdit;
 	m_accent = new QLineEdit;
 	auto colorRow = [this](QLineEdit *edit) {
-		auto *pick = new QPushButton("Pick...");
+		auto *pick = new QPushButton(L("Pick..."));
 		connect(pick, &QPushButton::clicked, this, [this, edit] {
 			const QColor c = QColorDialog::getColor(QColor(edit->text()), this);
 			if (c.isValid())
@@ -144,16 +145,16 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 	m_min = new QDoubleSpinBox;
 	m_min->setRange(0, 1e9);
 	m_min->setDecimals(0);
-	m_tts = new QCheckBox("Read their message aloud (text to speech)");
+	m_tts = new QCheckBox(L("Read their message aloud (text to speech)"));
 	m_ttsMin = new QDoubleSpinBox;
 	m_ttsMin->setRange(0, 1e9);
 	m_ttsMin->setDecimals(0);
 	m_variants = new QTableWidget(0, 4);
-	m_variants->setHorizontalHeaderLabels({"From amount", "Title", "Picture", "Sound"});
+	m_variants->setHorizontalHeaderLabels({L("From amount"), L("Title"), L("Picture"), L("Sound")});
 	m_variants->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
 	m_variants->setMinimumHeight(110);
-	auto *addVariant = new QPushButton("Add a bigger-amount version");
-	auto *removeVariant = new QPushButton("Remove");
+	auto *addVariant = new QPushButton(L("Add a bigger-amount version"));
+	auto *removeVariant = new QPushButton(L("Remove"));
 	connect(addVariant, &QPushButton::clicked, this, [this] {
 		const int r = m_variants->rowCount();
 		m_variants->insertRow(r);
@@ -175,23 +176,23 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 	auto *form = new QFormLayout;
 	form->setVerticalSpacing(8);
 	form->addRow("", m_on);
-	form->addRow("Title", m_title);
+	form->addRow(L("Title"), m_title);
 	form->addRow("", hint("Words in braces fill in: {name}, {amount}, {count}, {months}, {message}."));
 	form->addRow("", m_message);
-	form->addRow("Picture or GIF", fileRow(m_image, "Pictures (*.png *.jpg *.jpeg *.gif *.webp)"));
-	form->addRow("Sound", fileRow(m_sound, "Sounds (*.mp3 *.wav *.ogg *.m4a)"));
-	form->addRow("Sound volume", m_volume);
-	form->addRow("On screen for", m_seconds);
-	form->addRow("Comes in with", m_animation);
-	form->addRow("Layout", m_layout);
-	form->addRow("Font", m_font);
-	form->addRow("Text size", m_size);
-	form->addRow("Text colour", colorRow(m_color));
-	form->addRow("Highlight colour", colorRow(m_accent));
-	form->addRow("Only from (amount)", m_min);
+	form->addRow(L("Picture or GIF"), fileRow(m_image, L("Pictures (*.png *.jpg *.jpeg *.gif *.webp)")));
+	form->addRow(L("Sound"), fileRow(m_sound, L("Sounds (*.mp3 *.wav *.ogg *.m4a)")));
+	form->addRow(L("Sound volume"), m_volume);
+	form->addRow(L("On screen for"), m_seconds);
+	form->addRow(L("Comes in with"), m_animation);
+	form->addRow(L("Layout"), m_layout);
+	form->addRow(L("Font"), m_font);
+	form->addRow(L("Text size"), m_size);
+	form->addRow(L("Text colour"), colorRow(m_color));
+	form->addRow(L("Highlight colour"), colorRow(m_accent));
+	form->addRow(L("Only from (amount)"), m_min);
 	form->addRow("", m_tts);
-	form->addRow("Read aloud from (amount)", m_ttsMin);
-	form->addRow("Bigger amounts", m_variants);
+	form->addRow(L("Read aloud from (amount)"), m_ttsMin);
+	form->addRow(L("Bigger amounts"), m_variants);
 	form->addRow("", variantButtons);
 	auto *formBox = new QWidget;
 	formBox->setLayout(form);
@@ -208,44 +209,44 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 	m_preview->setMinimumSize(400, 225);
 	m_preview->setAlignment(Qt::AlignCenter);
 	m_preview->setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #1d2b3a, stop:1 #3a2440); border-radius: 12px;");
-	auto *replay = new QPushButton("Play the preview again");
-	auto *test = new QPushButton("Test on stream");
+	auto *replay = new QPushButton(L("Play the preview again"));
+	auto *test = new QPushButton(L("Test on stream"));
 	test->setObjectName("primary");
-	test->setToolTip("Sends a pretend event: every alert box shows it (and plays its sound) exactly as viewers would see it");
+	test->setToolTip(L("Sends a pretend event: every alert box shows it (and plays its sound) exactly as viewers would see it"));
 	connect(replay, &QPushButton::clicked, this, [this] { m_previewStart = QDateTime::currentMSecsSinceEpoch(); });
 	connect(test, &QPushButton::clicked, this, [this] {
 		save();
 		EventHub::get().test(m_type);
 	});
 	auto *voice = new QComboBox;
-	voice->addItem("Windows default voice", "");
+	voice->addItem(L("Windows default voice"), "");
 	for (const QString &v : voices())
 		voice->addItem(v, v);
 	voice->setCurrentIndex(std::max(0, voice->findData(Settings::get().value("alerts/voice").toString())));
 	connect(voice, &QComboBox::currentIndexChanged, this,
 		[voice] { Settings::get().set("alerts/voice", voice->currentData()); });
-	auto *hear = new QCheckBox("I hear alert sounds in my headphones too");
+	auto *hear = new QCheckBox(L("I hear alert sounds in my headphones too"));
 	hear->setChecked(Settings::get().value("alerts/hear", true).toBool());
 	connect(hear, &QCheckBox::toggled, this, [](bool on) { Settings::get().set("alerts/hear", on); });
-	auto *exportBtn = new QPushButton("Export design...");
-	auto *importBtn = new QPushButton("Import design...");
+	auto *exportBtn = new QPushButton(L("Export design..."));
+	auto *importBtn = new QPushButton(L("Import design..."));
 	connect(exportBtn, &QPushButton::clicked, this, [this] {
 		store();
-		const QString file = QFileDialog::getSaveFileName(this, "Export alert design",
-								  QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/My alerts.zalerts",
+		const QString file = QFileDialog::getSaveFileName(this, L("Export alert design"),
+								  QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + L("/My alerts.zalerts"),
 								  "Zunimi alert design (*.zalerts)");
 		QFile f(file);
 		if (!file.isEmpty() && f.open(QIODevice::WriteOnly))
 			f.write(QJsonDocument(m_design).toJson());
 	});
 	connect(importBtn, &QPushButton::clicked, this, [this] {
-		const QString file = QFileDialog::getOpenFileName(this, "Import alert design", {}, "Zunimi alert design (*.zalerts *.json)");
+		const QString file = QFileDialog::getOpenFileName(this, L("Import alert design"), {}, "Zunimi alert design (*.zalerts *.json)");
 		QFile f(file);
 		if (file.isEmpty() || !f.open(QIODevice::ReadOnly))
 			return;
 		const QJsonObject d = QJsonDocument::fromJson(f.readAll()).object();
 		if (!d.contains("follow")) {
-			QMessageBox::warning(this, "Import", "That file isn't an alert design.");
+			QMessageBox::warning(this, L("Import"), L("That file isn't an alert design."));
 			return;
 		}
 		m_design = d;
@@ -256,10 +257,10 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 	right->addWidget(replay);
 	right->addWidget(test);
 	right->addSpacing(12);
-	right->addWidget(new QLabel("Voice for reading messages"));
+	right->addWidget(new QLabel(L("Voice for reading messages")));
 	right->addWidget(voice);
-	right->addWidget(hint("Hindi voices appear here once Windows has the Hindi speech pack (Settings > Time & "
-			      "language > Speech)."));
+	right->addWidget(hint(L("Hindi voices appear here once Windows has the Hindi speech pack (Settings > Time & "
+			      "language > Speech).")));
 	right->addWidget(hear);
 	right->addStretch();
 	right->addWidget(exportBtn);
@@ -308,9 +309,9 @@ AlertDesigner::AlertDesigner(obs_source_t *source, QWidget *parent) : QDialog(pa
 
 QWidget *AlertDesigner::fileRow(QLineEdit *edit, const QString &filter)
 {
-	auto *pick = new QPushButton("Choose...");
+	auto *pick = new QPushButton(L("Choose..."));
 	connect(pick, &QPushButton::clicked, this, [this, edit, filter] {
-		const QString file = QFileDialog::getOpenFileName(this, "Choose a file", QFileInfo(edit->text()).absolutePath(), filter);
+		const QString file = QFileDialog::getOpenFileName(this, L("Choose a file"), QFileInfo(edit->text()).absolutePath(), filter);
 		if (!file.isEmpty())
 			edit->setText(file);
 	});

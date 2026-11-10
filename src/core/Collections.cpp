@@ -1,6 +1,7 @@
 // Scene collections (whole sets of scenes, one file each), profiles (stream, video and recording settings),
 // and importing scene collections made in OBS Studio or shipped with overlay packs.
 #include "core/ObsCore.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 
@@ -101,12 +102,12 @@ bool ObsCore::switchCollection(const QString &name, QString *error)
 	if (name == m_collection)
 		return true;
 	if (!QFile::exists(collectionPath(name))) {
-		*error = "That scene collection is missing.";
+		*error = L("That scene collection is missing.");
 		return false;
 	}
 	if (streaming() || recording()) {
 		// switching rebuilds every source; a game capture or webcam would blink on stream
-		*error = "Stop the stream and recording first: switching rebuilds every source.";
+		*error = L("Stop the stream and recording first: switching rebuilds every source.");
 		return false;
 	}
 	save();
@@ -125,19 +126,19 @@ bool ObsCore::newCollection(const QString &name, bool copyCurrent, QString *erro
 {
 	const QString n = name.trimmed();
 	if (!validName(n) || collections().contains(n, Qt::CaseInsensitive)) {
-		*error = "Pick a name that isn't used yet (no \\ / : * ? \" < > |).";
+		*error = L("Pick a name that isn't used yet (no \\ / : * ? \" < > |).");
 		return false;
 	}
 	save();
 	if (copyCurrent) {
 		if (!QFile::copy(collectionPath(m_collection), collectionPath(n))) {
-			*error = "The copy could not be written.";
+			*error = L("The copy could not be written.");
 			return false;
 		}
 	} else {
 		QFile f(collectionPath(n));
 		if (!f.open(QIODevice::WriteOnly)) {
-			*error = "The new collection could not be written.";
+			*error = L("The new collection could not be written.");
 			return false;
 		}
 		f.write(QJsonDocument(QJsonObject{{"name", n}, {"sources", QJsonArray()}}).toJson());
@@ -149,13 +150,13 @@ bool ObsCore::renameCollection(const QString &from, const QString &to, QString *
 {
 	const QString n = to.trimmed();
 	if (!validName(n) || (collections().contains(n, Qt::CaseInsensitive) && n.compare(from, Qt::CaseInsensitive))) {
-		*error = "Pick a name that isn't used yet.";
+		*error = L("Pick a name that isn't used yet.");
 		return false;
 	}
 	if (from == m_collection)
 		save();
 	if (!QFile::rename(collectionPath(from), collectionPath(n))) {
-		*error = "It could not be renamed.";
+		*error = L("It could not be renamed.");
 		return false;
 	}
 	QFile::remove(collectionPath(from) + ".bak");
@@ -171,7 +172,7 @@ bool ObsCore::renameCollection(const QString &from, const QString &to, QString *
 bool ObsCore::removeCollection(const QString &name, QString *error)
 {
 	if (collections().size() <= 1) {
-		*error = "One scene collection is always kept.";
+		*error = L("One scene collection is always kept.");
 		return false;
 	}
 	if (name == m_collection) {
@@ -190,13 +191,13 @@ QString ObsCore::importCollection(const QString &jsonPath, const QString &search
 {
 	QFile file(jsonPath);
 	if (!file.open(QIODevice::ReadOnly)) {
-		*error = "That file could not be opened.";
+		*error = L("That file could not be opened.");
 		return {};
 	}
 	QJsonParseError parse{};
 	const QJsonObject in = QJsonDocument::fromJson(file.readAll(), &parse).object();
 	if (parse.error != QJsonParseError::NoError || !in.contains("sources")) {
-		*error = "That isn't a scene collection. Look for the .json file that came with the OBS version of the pack.";
+		*error = L("That isn't a scene collection. Look for the .json file that came with the OBS version of the pack.");
 		return {};
 	}
 
@@ -215,7 +216,7 @@ QString ObsCore::importCollection(const QString &jsonPath, const QString &search
 		QJsonObject s = v.toObject();
 		const QString name = s.value("name").toString();
 		if (name == "Desktop audio" || name == "Microphone") // ours; theirs gets a new name
-			s["name"] = name + " (imported)";
+			s["name"] = name + L(" (imported)");
 		s["settings"] = fixer.fix(s.value("settings"));
 		const QString id = s.value("id").toString();
 		if (obs_get_source_output_flags(id.toUtf8().constData()) == 0 && !unsupported.contains(id))
@@ -227,7 +228,7 @@ QString ObsCore::importCollection(const QString &jsonPath, const QString &search
 	if (!validName(base))
 		base = QFileInfo(jsonPath).completeBaseName();
 	if (!validName(base))
-		base = "Imported";
+		base = L("Imported");
 	QString name = base;
 	for (int i = 2; collections().contains(name, Qt::CaseInsensitive); i++)
 		name = QString("%1 %2").arg(base).arg(i);
@@ -240,33 +241,33 @@ QString ObsCore::importCollection(const QString &jsonPath, const QString &search
 	out["current_program_scene"] = in.value("current_program_scene");
 	QFile target(collectionPath(name));
 	if (!target.open(QIODevice::WriteOnly)) {
-		*error = "The imported collection could not be written.";
+		*error = L("The imported collection could not be written.");
 		return {};
 	}
 	target.write(QJsonDocument(out).toJson());
 	target.close();
 
 	if (notes) {
-		notes->append(QString("%1 scenes and sources brought in.").arg(kept.size()));
+		notes->append(QString(L("%1 scenes and sources brought in.")).arg(kept.size()));
 		if (fixer.fixed)
-			notes->append(QString("%1 file paths pointed at another PC and were found here.").arg(fixer.fixed));
+			notes->append(QString(L("%1 file paths pointed at another PC and were found here.")).arg(fixer.fixed));
 		if (fixer.missing)
-			notes->append(QString("%1 files could not be found. Keep the pack's folder where it is, or pick it "
-					      "as the search folder and import again.")
+			notes->append(QString(L("%1 files could not be found. Keep the pack's folder where it is, or pick it "
+					      "as the search folder and import again."))
 					      .arg(fixer.missing));
 		for (const QString &id : unsupported) {
 			if (id == "browser_source")
-				notes->append("Browser sources (alerts and widgets from websites) are kept and start working "
-					      "once the browser source is switched on.");
+				notes->append(L("Browser sources (alerts and widgets from websites) are kept and start working "
+					      "once the browser source is switched on."));
 			else
-				notes->append("Kept but not shown yet (needs an OBS plugin Zunimi doesn't have): " + id);
+				notes->append(L("Kept but not shown yet (needs an OBS plugin Zunimi doesn't have): ") + id);
 		}
-		notes->append("Positions were made for the pack's canvas. If things look misplaced, match its "
-			      "resolution in Settings > Video (most packs use 1920 x 1080).");
+		notes->append(L("Positions were made for the pack's canvas. If things look misplaced, match its "
+			      "resolution in Settings > Video (most packs use 1920 x 1080)."));
 	}
 	QString switchError;
 	if (!switchCollection(name, &switchError) && notes)
-		notes->append("Saved as \"" + name + "\". Switch to it when you're not live: " + switchError);
+		notes->append(L("Saved as \"") + name + L("\". Switch to it when you're not live: ") + switchError);
 	return name;
 }
 
@@ -308,7 +309,7 @@ bool ObsCore::switchProfile(const QString &name, QString *error)
 	if (name == profile())
 		return true;
 	if (busy()) {
-		*error = "Stop the stream, recording, replay buffer and virtual camera first.";
+		*error = L("Stop the stream, recording, replay buffer and virtual camera first.");
 		return false;
 	}
 	Settings &st = Settings::get();
@@ -335,7 +336,7 @@ bool ObsCore::newProfile(const QString &name, QString *error)
 {
 	const QString n = name.trimmed();
 	if (!validName(n) || profiles().contains(n, Qt::CaseInsensitive)) {
-		*error = "Pick a name that isn't used yet.";
+		*error = L("Pick a name that isn't used yet.");
 		return false;
 	}
 	storeProfile(profile());
@@ -346,7 +347,7 @@ bool ObsCore::newProfile(const QString &name, QString *error)
 bool ObsCore::removeProfile(const QString &name, QString *error)
 {
 	if (name == "Default") {
-		*error = "The Default profile is always kept.";
+		*error = L("The Default profile is always kept.");
 		return false;
 	}
 	if (name == profile() && !switchProfile("Default", error))

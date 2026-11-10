@@ -1,4 +1,5 @@
 #include "ui/PropertiesView.h"
+#include "core/I18n.h"
 
 #include <QCheckBox>
 #include <QColorDialog>
@@ -134,7 +135,7 @@ void PropertiesView::rebuild()
 	if (m_props)
 		addProperties(m_props, form);
 	if (form->rowCount() == 0)
-		form->addRow(note("This has no options to change."));
+		form->addRow(note(L("This has no options to change.")));
 	area->setWidget(inner);
 	m_body = area;
 	m_layout->addWidget(area);
@@ -280,7 +281,7 @@ void PropertiesView::addProperty(obs_property_t *p, QFormLayout *form)
 		auto *h = new QHBoxLayout(row);
 		h->setContentsMargins(0, 0, 0, 0);
 		auto *edit = new QLineEdit(text(obs_data_get_string(m_settings, name)));
-		auto *browse = new QPushButton("Browse...");
+		auto *browse = new QPushButton(L("Browse..."));
 		const obs_path_type type = obs_property_path_type(p);
 		const QString filter = text(obs_property_path_filter(p)), start = text(obs_property_path_default_path(p));
 		connect(edit, &QLineEdit::editingFinished, this, [this, edit, name, prop] {
@@ -344,7 +345,7 @@ void PropertiesView::addProperty(obs_property_t *p, QFormLayout *form)
 			}
 			QString itemName = text(obs_property_list_item_name(p, i));
 			if (itemName.startsWith(':')) // a screen without a name (often the laptop's own panel)
-				itemName = "Built-in display" + itemName;
+				itemName = L("Built-in display") + itemName;
 			combo->addItem(itemName, value);
 			if (obs_property_list_item_disabled(p, i)) {
 				if (auto *model = qobject_cast<QStandardItemModel *>(combo->model()))
@@ -358,7 +359,7 @@ void PropertiesView::addProperty(obs_property_t *p, QFormLayout *form)
 		else if (editable)
 			combo->setEditText(current.toString());
 		else if (!current.toString().isEmpty()) { // the saved choice is gone (a closed window, an unplugged camera)
-			combo->insertItem(0, current.toString() + "  (not found)", current);
+			combo->insertItem(0, current.toString() + L("  (not found)"), current);
 			combo->setCurrentIndex(0);
 		}
 		auto apply = [this, name, prop, format](const QVariant &v) {
@@ -411,7 +412,7 @@ void PropertiesView::addProperty(obs_property_t *p, QFormLayout *form)
 				.arg(obs_data_get_int(font, "size"));
 		};
 		obs_data_t *font = obs_data_get_obj(m_settings, name);
-		button->setText(font ? describe(font) : "Choose a font");
+		button->setText(font ? describe(font) : L("Choose a font"));
 		obs_data_release(font);
 		connect(button, &QPushButton::clicked, this, [this, button, name, prop, describe] {
 			obs_data_t *font = obs_data_get_obj(m_settings, name);
@@ -424,7 +425,7 @@ void PropertiesView::addProperty(obs_property_t *p, QFormLayout *form)
 			initial.setStrikeOut(flags & 8);
 			obs_data_release(font);
 			bool ok = false;
-			const QFont f = QFontDialog::getFont(&ok, initial, this, "Font");
+			const QFont f = QFontDialog::getFont(&ok, initial, this, L("Font"));
 			if (!ok)
 				return;
 			obs_data_t *out = obs_data_create();
@@ -482,8 +483,8 @@ void PropertiesView::addProperty(obs_property_t *p, QFormLayout *form)
 		const obs_editable_list_type type = obs_property_editable_list_type(p);
 		const QString filter = text(obs_property_editable_list_filter(p));
 		auto *row = new QHBoxLayout;
-		auto *add = new QPushButton(type == OBS_EDITABLE_LIST_TYPE_STRINGS ? "Add" : "Add files...");
-		auto *remove = new QPushButton("Remove");
+		auto *add = new QPushButton(type == OBS_EDITABLE_LIST_TYPE_STRINGS ? L("Add") : L("Add files..."));
+		auto *remove = new QPushButton(L("Remove"));
 		connect(add, &QPushButton::clicked, this, [this, list, store, type, filter, label] {
 			if (type == OBS_EDITABLE_LIST_TYPE_STRINGS) {
 				bool ok = false;
@@ -532,7 +533,7 @@ void PropertiesView::addProperty(obs_property_t *p, QFormLayout *form)
 		return;
 	}
 	default:
-		form->addRow(label, note("Not adjustable here yet."));
+		form->addRow(label, note(L("Not adjustable here yet.")));
 		return;
 	}
 

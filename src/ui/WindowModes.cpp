@@ -1,4 +1,5 @@
 #include "ui/WindowModes.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 
@@ -53,7 +54,7 @@ void CornerControls::mouseMoveEvent(QMouseEvent *event)
 	const int i = indexAt(int(event->position().x()));
 	if (i != m_hot) {
 		m_hot = i;
-		setToolTip(i >= 0 ? TIPS[i] : "");
+		setToolTip(i >= 0 ? L(TIPS[i]) : QString());
 		update();
 	}
 }
@@ -119,17 +120,17 @@ WindowModes::WindowModes(QWidget *window, const QString &name)
 	window->installEventFilter(this);
 
 	m_menu = new QMenu(window);
-	m_menu->addAction("Open " + name, this, &WindowModes::showAgain);
+	m_menu->addAction(QString(L("Open %1")).arg(name), this, &WindowModes::showAgain);
 	syncTray();
 }
 
 QString WindowModes::label(const QString &mode)
 {
 	if (mode == "borderless")
-		return "Borderless";
+		return L("Borderless");
 	if (mode == "fullscreen")
-		return "Fullscreen";
-	return "Windowed";
+		return L("Fullscreen");
+	return L("Windowed");
 }
 
 QString WindowModes::mode() const
@@ -287,14 +288,14 @@ bool WindowModes::handleKey(QKeyEvent *event)
 	QMessageBox box(m_window);
 	box.setWindowTitle(m_name);
 	box.setIcon(QMessageBox::Question);
-	box.setText("Hide " + m_name + " to the tray?");
-	box.setInformativeText("It keeps running (a stream or recording carries on). Click the tray icon to open it again.");
-	QPushButton *hide = box.addButton("Hide to tray", QMessageBox::AcceptRole);
-	QPushButton *quitApp = box.addButton("Quit", QMessageBox::DestructiveRole);
+	box.setText(QString(L("Hide %1 to the tray?")).arg(m_name));
+	box.setInformativeText(L("It keeps running (a stream or recording carries on). Click the tray icon to open it again."));
+	QPushButton *hide = box.addButton(L("Hide to tray"), QMessageBox::AcceptRole);
+	QPushButton *quitApp = box.addButton(L("Quit"), QMessageBox::DestructiveRole);
 	QPushButton *cancel = box.addButton(QMessageBox::Cancel);
 	box.setDefaultButton(cancel);
 	box.setEscapeButton(cancel);
-	auto *never = new QCheckBox("Don't ask again when I press Esc");
+	auto *never = new QCheckBox(L("Don't ask again when I press Esc"));
 	box.setCheckBox(never);
 	box.exec();
 	if (box.clickedButton() == hide) {
@@ -337,8 +338,8 @@ bool WindowModes::hideToTray()
 	Settings &s = Settings::get();
 	if (!s.value("tray/hintShown", false).toBool()) {
 		m_tray->showMessage(m_name,
-				    m_name + " is still running here in the tray. Click this icon to open it, or change "
-					     "this in Settings > Window.",
+				    m_name + L(" is still running here in the tray. Click this icon to open it, or change "
+					     "this in Settings > Window."),
 				    QSystemTrayIcon::Information, 6000);
 		s.set("tray/hintShown", true);
 	}
@@ -350,7 +351,8 @@ bool WindowModes::confirm()
 	const QString why = busy ? busy() : QString();
 	showAgain();
 	// Quitting always asks, so a stray click or key never closes the app. No is the default.
-	const QString text = why.isEmpty() ? "Quit " + m_name + "?" : why + "\n\nQuit " + m_name + " anyway?";
+	const QString text = why.isEmpty() ? QString(L("Quit %1?")).arg(m_name)
+					   : why + "\n\n" + QString(L("Quit %1 anyway?")).arg(m_name);
 	return QMessageBox::question(m_window, m_name, text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) ==
 	       QMessageBox::Yes;
 }

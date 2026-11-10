@@ -1,5 +1,6 @@
 // Editing items in a scene, and undo/redo for every change made to scenes and their items.
 #include "core/ObsCore.h"
+#include "core/I18n.h"
 
 #include <QPointF>
 
@@ -169,7 +170,7 @@ void ObsCore::undo()
 	if (a.redo)
 		m_redo.append(a);
 	emit undoChanged();
-	emit notice("Undid: " + a.label);
+	emit notice(L("Undid: ") + a.label);
 }
 
 void ObsCore::redo()
@@ -182,7 +183,7 @@ void ObsCore::redo()
 	m_replaying = false;
 	m_undo.append(a);
 	emit undoChanged();
-	emit notice("Redid: " + a.label);
+	emit notice(L("Redid: ") + a.label);
 }
 
 // ---- transforms
@@ -198,7 +199,7 @@ void ObsCore::keepCentre(obs_sceneitem_t *item, const QPointF &centre)
 
 void ObsCore::rotate(const QString &name, float degrees)
 {
-	editItem(name, "Rotate", [&](obs_sceneitem_t *it) {
+	editItem(name, L("Rotate"), [&](obs_sceneitem_t *it) {
 		const QPointF centre = itemBox(it).center();
 		float rot = std::fmod(obs_sceneitem_get_rot(it) + degrees, 360.0f);
 		if (rot < 0)
@@ -210,7 +211,7 @@ void ObsCore::rotate(const QString &name, float degrees)
 
 void ObsCore::flip(const QString &name, bool horizontal)
 {
-	editItem(name, horizontal ? "Flip" : "Flip upside down", [&](obs_sceneitem_t *it) {
+	editItem(name, horizontal ? L("Flip") : L("Flip upside down"), [&](obs_sceneitem_t *it) {
 		const QPointF centre = itemBox(it).center();
 		vec2 s{};
 		obs_sceneitem_get_scale(it, &s);
@@ -225,17 +226,17 @@ void ObsCore::flip(const QString &name, bool horizontal)
 
 void ObsCore::setCrop(const QString &name, const obs_sceneitem_crop &crop)
 {
-	editItem(name, "Crop", [&](obs_sceneitem_t *it) { obs_sceneitem_set_crop(it, &crop); });
+	editItem(name, L("Crop"), [&](obs_sceneitem_t *it) { obs_sceneitem_set_crop(it, &crop); });
 }
 
 void ObsCore::setBlend(const QString &name, obs_blending_type type)
 {
-	editItem(name, "Blend mode", [type](obs_sceneitem_t *it) { obs_sceneitem_set_blending_mode(it, type); });
+	editItem(name, L("Blend mode"), [type](obs_sceneitem_t *it) { obs_sceneitem_set_blending_mode(it, type); });
 }
 
 void ObsCore::setScaleFilter(const QString &name, obs_scale_type type)
 {
-	editItem(name, "Scaling", [type](obs_sceneitem_t *it) { obs_sceneitem_set_scale_filter(it, type); });
+	editItem(name, L("Scaling"), [type](obs_sceneitem_t *it) { obs_sceneitem_set_scale_filter(it, type); });
 }
 
 void ObsCore::setShowHide(const QString &name, const QString &transitionId, int ms)
@@ -269,7 +270,7 @@ QString ObsCore::showHide(const QString &name) const
 
 void ObsCore::resetTransform(const QString &name)
 {
-	editItem(name, "Reset size", [this](obs_sceneitem_t *it) {
+	editItem(name, L("Reset size"), [this](obs_sceneitem_t *it) {
 		obs_sceneitem_crop none{};
 		obs_sceneitem_set_crop(it, &none);
 		place(it, {0, 0, double(m_plan.width), double(m_plan.height)});
@@ -291,7 +292,7 @@ bool ObsCore::pasteTransform(const QString &name)
 	obs_sceneitem_t *it = item(name);
 	if (!it || !m_copied)
 		return false;
-	editItem(name, "Paste size and place", [this](obs_sceneitem_t *target) {
+	editItem(name, L("Paste size and place"), [this](obs_sceneitem_t *target) {
 		ItemState s = itemState(target);
 		s.info = m_copied->info;
 		s.crop = m_copied->crop;

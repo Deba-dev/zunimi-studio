@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<title>Zunimi remote</title>
+<link rel="icon" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
+<style>
+:root {
+	--bg: #0b0e14; --panel: #131824; --panel2: #1a2130; --line: #263042; --text: #e8edf5; --dim: #8a96aa;
+	--accent: #22d3ee; --live: #ef4444; --rec: #f97316; --ok: #22c55e;
+	color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { padding: max(14px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto; }
+header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+header img { width: 28px; height: 28px; border-radius: 7px; }
+header h1 { font-size: 17px; margin: 0; flex: 1; font-weight: 650; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); }
+.dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; min-height: 30px; }
+.pill { padding: 5px 11px; border-radius: 999px; font-size: 13px; font-weight: 650; background: var(--panel2); color: var(--dim); }
+.pill.live { background: var(--live); color: #fff; }
+.pill.rec { background: var(--rec); color: #fff; }
+.pill.warn { background: #713f12; color: #fde68a; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 20px 0 8px; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 520px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+	padding: 16px 12px; min-height: 64px; font-weight: 600; cursor: pointer; touch-action: manipulation; transition: transform .08s, background .15s; }
+button:active { transform: scale(.97); }
+button:disabled { opacity: .4; }
+button.big { grid-column: 1 / -1; min-height: 76px; font-size: 19px; }
+button.live { background: var(--live); border-color: var(--live); color: #fff; }
+button.rec { background: var(--rec); border-color: var(--rec); color: #fff; }
+button.on { border-color: var(--accent); color: var(--accent); }
+button.muted { background: #3b1219; border-color: var(--live); color: #fca5a5; }
+button small { display: block; font-weight: 400; font-size: 12px; color: inherit; opacity: .75; margin-top: 2px; }
+.scene.program { background: var(--live); border-color: var(--live); color: #fff; }
+.scene.preview { border-color: var(--accent); color: var(--accent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; margin-top: 30px; }
+.card p { color: var(--dim); margin: 0 0 14px; }
+input { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.primary { width: 100%; background: var(--accent); border-color: var(--accent); color: #031317; min-height: 52px; }
+.note { color: var(--dim); font-size: 13px; text-align: center; margin-top: 22px; }
+.toast { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--panel2);
+	border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+.toast.show { opacity: 1; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header><img src="/logo.png" alt=""><h1>Zunimi remote</h1><span class="dot" id="dot" title="connection"></span></header>
+
+<section id="login" class="card hidden">
+	<p id="loginText">Enter the remote password from Zunimi Studio: Settings &gt; Remote.</p>
+	<input id="pw" type="password" autocomplete="current-password" placeholder="Password">
+	<button class="primary" id="go">Connect</button>
+</section>
+
+<main id="app" class="hidden">
+	<div class="pills" id="pills"></div>
+	<div class="grid">
+		<button class="big" id="live">Go Live</button>
+		<button id="rec">Record</button>
+		<button id="pause" class="hidden">Pause</button>
+		<button id="replay">Replay buffer<small>off</small></button>
+		<button id="save">Save replay</button>
+		<button id="mark">Mark moment</button>
+		<button id="shot">Screenshot</button>
+	</div>
+	<h2>Sound</h2>
+	<div class="grid" id="audio"></div>
+	<h2 id="scenesTitle">Scenes</h2>
+	<div class="grid" id="scenes"></div>
+	<div class="grid hidden" id="studioRow" style="margin-top:10px"><button class="big on" id="transition">Send preview live</button></div>
+	<p class="note">Keep this page open to stay connected. Add it to your home screen for one-tap access.</p>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// SHA-256 (FIPS 180-4). Pages on http:// home addresses have no crypto.subtle, so the login hash is done here.
+function sha256(bytes) {
+	const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+		0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+		0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+		0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+		0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+		0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+		0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+		0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+	const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+	const len = bytes.length, total = ((len + 9 + 63) >> 6) << 6;
+	const m = new Uint8Array(total);
+	m.set(bytes);
+	m[len] = 0x80;
+	const bits = len * 8;
+	for (let i = 0; i < 8; i++) m[total - 1 - i] = Math.floor(bits / Math.pow(2, 8 * i)) & 0xff;
+	const w = new Uint32Array(64);
+	const r = (x, n) => (x >>> n) | (x << (32 - n));
+	for (let o = 0; o < total; o += 64) {
+		for (let i = 0; i < 16; i++) w[i] = (m[o + 4*i] << 24) | (m[o + 4*i + 1] << 16) | (m[o + 4*i + 2] << 8) | m[o + 4*i + 3];
+		for (let i = 16; i < 64; i++) {
+			const s0 = r(w[i-15], 7) ^ r(w[i-15], 18) ^ (w[i-15] >>> 3);
+			const s1 = r(w[i-2], 17) ^ r(w[i-2], 19) ^ (w[i-2] >>> 10);
+			w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0;
+		}
+		let [a, b, c, d, e, f, g, h] = H;
+		for (let i = 0; i < 64; i++) {
+			const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+			const t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+			h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+		}
+		H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+		H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+	}
+	const out = new Uint8Array(32);
+	H.forEach((v, i) => { out[4*i] = v >>> 24; out[4*i + 1] = (v >>> 16) & 0xff; out[4*i + 2] = (v >>> 8) & 0xff; out[4*i + 3] = v & 0xff; });
+	return out;
+}
+const b64sha = text => btoa(String.fromCharCode(...sha256(new TextEncoder().encode(text))));
+function authString(password, salt, challenge) { return b64sha(b64sha(password + salt) + challenge); }
+if (typeof module !== "undefined") { module.exports = { sha256, authString }; }
+</script>
+<script>
+"use strict";
+const HI = {
+"Zunimi remote": "Zunimi रिमोट",
+"Enter the remote password from Zunimi Studio: Settings > Remote.": "Zunimi Studio का रिमोट पासवर्ड डालें: सेटिंग्स > रिमोट।",
+"Password": "पासवर्ड",
+"Connect": "जोड़ें",
+"Go Live": "लाइव जाएँ",
+"End stream": "स्ट्रीम बंद करें",
+"Record": "रिकॉर्ड",
+"Stop recording": "रिकॉर्डिंग बंद करें",
+"Pause": "रोकें",
+"Resume": "फिर शुरू करें",
+"Replay buffer": "रीप्ले बफ़र",
+"on": "चालू",
+"off": "बंद",
+"Save replay": "रीप्ले सेव करें",
+"Mark moment": "मोमेंट मार्क करें",
+"Screenshot": "स्क्रीनशॉट",
+"Sound": "आवाज़",
+"Scenes": "सीन",
+"Scenes (tap to preview)": "सीन (प्रीव्यू के लिए टैप करें)",
+"Send preview live": "प्रीव्यू लाइव भेजें",
+"Keep this page open to stay connected. Add it to your home screen for one-tap access.": "जुड़े रहने के लिए यह पेज खुला रखें। एक टैप में खोलने के लिए इसे होम स्क्रीन पर जोड़ें।",
+"That password did not work. Check Settings > Remote in Zunimi Studio.": "वह पासवर्ड नहीं चला। Zunimi Studio में सेटिंग्स > रिमोट देखें।",
+"Replay saved.": "रीप्ले सेव हुआ।",
+"Zunimi Studio is closing.": "Zunimi Studio बंद हो रहा है।",
+"You're live!": "आप लाइव हैं!",
+"Stream ended.": "स्ट्रीम ख़त्म हुई।",
+"Moment marked.": "मोमेंट मार्क हुआ।",
+"Screenshot taken.": "स्क्रीनशॉट लिया गया।",
+"End the stream?": "स्ट्रीम बंद करें?",
+"Off air": "ऑफ़ एयर",
+"LIVE": "लाइव",
+"REC": "REC",
+"REC paused": "REC रुकी है",
+"Replay buffer on": "रीप्ले बफ़र चालू",
+"Connection struggling": "कनेक्शन कमज़ोर है",
+"on air": "ऑन एयर",
+"preview": "प्रीव्यू",
+"muted": "म्यूट",
+"Mic": "माइक",
+"Desktop": "डेस्कटॉप",
+"No mic or desktop audio in Zunimi.": "Zunimi में माइक या डेस्कटॉप ऑडियो नहीं है।",
+"That did not work.": "वह नहीं हुआ।",
+"Not connected": "जुड़ा नहीं है",
+"Disconnected": "कनेक्शन टूट गया"
+};
+if (typeof document !== "undefined") (function () {
+	// Zunimi serves this page with lang="hi" when its own language is Hindi
+	const tr = (text) => (document.documentElement.lang === "hi" && HI[text]) || text;
+	(function translateStatic(node) {
+		for (const child of node.childNodes) {
+			if (child.nodeType === 3 && child.textContent.trim() && HI[child.textContent.trim()] && document.documentElement.lang === "hi")
+				child.textContent = child.textContent.replace(child.textContent.trim(), HI[child.textContent.trim()]);
+			else if (child.nodeType === 1 && child.tagName !== "SCRIPT") translateStatic(child);
+		}
+		const pw = document.getElementById("pw");
+		if (pw) pw.placeholder = tr("Password");
+	})(document.body);
+	const $ = id => document.getElementById(id);
+	let ws = null, password = "", nextId = 1, pending = new Map(), retry = 0, wrongPassword = false;
+	const state = { live: false, rec: false, paused: false, replay: false, studio: false, program: "", preview: "",
+		scenes: [], audio: [], liveSince: 0, recSince: 0, congestion: 0 };
+
+	try { password = decodeURIComponent(location.hash.slice(1)) || localStorage.getItem("zunimi-remote") || ""; } catch (e) { password = ""; }
+	if (location.hash) history.replaceState(null, "", location.pathname); // the password does not stay in the address bar
+
+	function toast(text) {
+		const t = $("toast");
+		t.textContent = text;
+		t.classList.add("show");
+		clearTimeout(toast.timer);
+		toast.timer = setTimeout(() => t.classList.remove("show"), 2600);
+	}
+	function showLogin(text) {
+		$("app").classList.add("hidden");
+		$("login").classList.remove("hidden");
+		if (text) $("loginText").textContent = text;
+		$("pw").value = password;
+	}
+	function call(requestType, requestData) {
+		return new Promise((resolve, reject) => {
+			if (!ws || ws.readyState !== 1) return reject(new Error("Not connected"));
+			const requestId = String(nextId++);
+			pending.set(requestId, { resolve, reject });
+			ws.send(JSON.stringify({ op: 6, d: { requestType, requestId, requestData } }));
+		});
+	}
+	const act = (type, data) => call(type, data).catch(e => toast(e.message));
+
+	function connect() {
+		if (ws && ws.readyState < 2) return; // already connecting or connected
+		$("dot").classList.remove("on");
+		ws = new WebSocket(`ws://${location.host}/`, "obswebsocket.json");
+		ws.onmessage = ev => {
+			const msg = JSON.parse(ev.data), d = msg.d;
+			if (msg.op === 0) {
+				const a = d.authentication;
+				ws.send(JSON.stringify({ op: 1, d: { rpcVersion: 1, authentication: a ? authString(password, a.salt, a.challenge) : undefined,
+					eventSubscriptions: 1 | 4 | 8 | 64 | 128 | 1024 } }));
+			} else if (msg.op === 2) {
+				retry = 0;
+				wrongPassword = false;
+				try { localStorage.setItem("zunimi-remote", password); } catch (e) {}
+				$("dot").classList.add("on");
+				$("login").classList.add("hidden");
+				$("app").classList.remove("hidden");
+				refresh();
+			} else if (msg.op === 7) {
+				const p = pending.get(d.requestId);
+				if (!p) return;
+				pending.delete(d.requestId);
+				d.requestStatus.result ? p.resolve(d.responseData || {}) : p.reject(new Error(d.requestStatus.comment || "That did not work."));
+			} else if (msg.op === 5) {
+				onEvent(d.eventType, d.eventData || {});
+			}
+		};
+		ws.onclose = ev => {
+			$("dot").classList.remove("on");
+			pending.forEach(p => p.reject(new Error("Disconnected")));
+			pending.clear();
+			if (ev.code === 4009) {
+				wrongPassword = true;
+				try { localStorage.removeItem("zunimi-remote"); } catch (e) {}
+				showLogin(tr("That password did not work. Check Settings > Remote in Zunimi Studio."));
+				return;
+			}
+			if (wrongPassword) return;
+			retry = Math.min(retry + 1, 6);
+			setTimeout(connect, 500 * retry); // Zunimi closed or Wi-Fi blinked: keep trying
+		};
+	}
+
+	async function refresh() {
+		try {
+			const [list, studio, stream, rec, replay, special] = await Promise.all([call("GetSceneList"), call("GetStudioModeEnabled"),
+				call("GetStreamStatus"), call("GetRecordStatus"), call("GetReplayBufferStatus"), call("GetSpecialInputs")]);
+			state.scenes = list.scenes.slice().reverse().map(s => s.sceneName);
+			state.program = list.currentProgramSceneName;
+			state.preview = list.currentPreviewSceneName || "";
+			state.studio = studio.studioModeEnabled;
+			state.live = stream.outputActive;
+			state.liveSince = state.live ? Date.now() - stream.outputDuration : 0;
+			state.rec = rec.outputActive;
+			state.paused = rec.outputPaused;
+			state.recSince = state.rec ? Date.now() - rec.outputDuration : 0;
+			state.replay = replay.outputActive;
+			const names = [["Mic", special.mic1], ["Desktop", special.desktop1]].filter(x => x[1]);
+			state.audio = await Promise.all(names.map(async ([label, name]) => ({ label, name, muted: (await call("GetInputMute", { inputName: name })).inputMuted })));
+			render();
+		} catch (e) { toast(e.message); }
+	}
+
+	function onEvent(type, d) {
+		if (type === "StreamStateChanged") { state.live = d.outputActive; state.liveSince = state.live ? Date.now() : 0; toast(tr(state.live ? "You're live!" : "Stream ended.")); }
+		else if (type === "RecordStateChanged") {
+			if (d.outputState === "OBS_WEBSOCKET_OUTPUT_PAUSED") state.paused = true;
+			else if (d.outputState === "OBS_WEBSOCKET_OUTPUT_RESUMED") state.paused = false;
+			else { state.rec = d.outputActive; state.paused = false; state.recSince = state.rec ? Date.now() : 0; }
+		}
+		else if (type === "ReplayBufferStateChanged") state.replay = d.outputActive;
+		else if (type === "ReplayBufferSaved") toast(tr("Replay saved."));
+		else if (type === "CurrentProgramSceneChanged") state.program = d.sceneName;
+		else if (type === "CurrentPreviewSceneChanged") state.preview = d.sceneName;
+		else if (type === "StudioModeStateChanged") { state.studio = d.studioModeEnabled; if (!state.studio) state.preview = ""; else refresh(); }
+		else if (type === "SceneListChanged") state.scenes = d.scenes.slice().reverse().map(s => s.sceneName);
+		else if (type === "InputMuteStateChanged") state.audio.forEach(a => { if (a.name === d.inputName) a.muted = d.inputMuted; });
+		else if (type === "ExitStarted") toast(tr("Zunimi Studio is closing."));
+		else return;
+		render();
+	}
+
+	const clock = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+	function pills() {
+		const p = [];
+		if (state.live) p.push(`<span class="pill live">${tr("LIVE")} ${clock(Date.now() - state.liveSince)}</span>`);
+		if (state.rec) p.push(`<span class="pill rec">${state.paused ? tr("REC paused") : "REC " + clock(Date.now() - state.recSince)}</span>`);
+		if (state.replay) p.push(`<span class="pill">${tr("Replay buffer on")}</span>`);
+		if (state.live && state.congestion > 0.3) p.push(`<span class="pill warn">${tr("Connection struggling")}</span>`);
+		if (!p.length) p.push(`<span class="pill">${tr("Off air")}</span>`);
+		$("pills").innerHTML = p.join("");
+	}
+	const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+	function render() {
+		pills();
+		$("live").textContent = tr(state.live ? "End stream" : "Go Live");
+		$("live").className = "big" + (state.live ? " live" : "");
+		$("rec").textContent = tr(state.rec ? "Stop recording" : "Record");
+		$("rec").className = state.rec ? "rec" : "";
+		$("pause").classList.toggle("hidden", !state.rec);
+		$("pause").textContent = tr(state.paused ? "Resume" : "Pause");
+		$("replay").innerHTML = `${tr("Replay buffer")}<small>${tr(state.replay ? "on" : "off")}</small>`;
+		$("replay").className = state.replay ? "on" : "";
+		$("save").disabled = !state.replay;
+		$("audio").innerHTML = state.audio.map((a, i) => `<button data-audio="${i}" class="${a.muted ? "muted" : ""}">${esc(tr(a.label))}<small>${tr(a.muted ? "muted" : "on")}</small></button>`).join("")
+			|| `<p class="note">${tr("No mic or desktop audio in Zunimi.")}</p>`;
+		$("scenesTitle").textContent = tr(state.studio ? "Scenes (tap to preview)" : "Scenes");
+		$("scenes").innerHTML = state.scenes.map(n => {
+			const cls = n === state.program ? "program" : (state.studio && n === state.preview ? "preview" : "");
+			const tag = tr(n === state.program ? "on air" : (state.studio && n === state.preview ? "preview" : ""));
+			return `<button class="scene ${cls}" data-scene="${esc(n)}">${esc(n)}${tag ? `<small>${tag}</small>` : ""}</button>`;
+		}).join("");
+		$("studioRow").classList.toggle("hidden", !state.studio);
+	}
+
+	$("live").onclick = () => {
+		if (state.live && !confirm(tr("End the stream?"))) return;
+		act(state.live ? "StopStream" : "StartStream");
+	};
+	$("rec").onclick = () => act(state.rec ? "StopRecord" : "StartRecord");
+	$("pause").onclick = () => act("ToggleRecordPause");
+	$("replay").onclick = () => act("ToggleReplayBuffer");
+	$("save").onclick = () => act("SaveReplayBuffer");
+	$("mark").onclick = () => act("CallVendorRequest", { vendorName: "zunimi", requestType: "mark", requestData: {} }).then(r => r && toast(tr("Moment marked.")));
+	$("shot").onclick = () => act("CallVendorRequest", { vendorName: "zunimi", requestType: "screenshot", requestData: {} }).then(r => r && toast(tr("Screenshot taken.")));
+	$("transition").onclick = () => act("TriggerStudioModeTransition");
+	$("audio").onclick = ev => {
+		const b = ev.target.closest("[data-audio]");
+		if (b) act("ToggleInputMute", { inputName: state.audio[+b.dataset.audio].name });
+	};
+	$("scenes").onclick = ev => {
+		const b = ev.target.closest("[data-scene]");
+		if (b) act(state.studio ? "SetCurrentPreviewScene" : "SetCurrentProgramScene", { sceneName: b.dataset.scene });
+	};
+	$("go").onclick = () => { password = $("pw").value; wrongPassword = false; $("login").classList.add("hidden"); connect(); };
+	$("pw").onkeydown = ev => { if (ev.key === "Enter") $("go").click(); };
+
+	setInterval(async () => {
+		if (!ws || ws.readyState !== 1) return;
+		if (state.live) { try { state.congestion = (await call("GetStreamStatus")).outputCongestion || 0; } catch (e) {} }
+		if (state.live || state.rec) pills();
+	}, 1000);
+	document.addEventListener("visibilitychange", () => { if (!document.hidden && (!ws || ws.readyState > 1)) { wrongPassword = false; connect(); } });
+
+	if (password) connect(); else showLogin();
+})();
+</script>
+</body>
+</html>

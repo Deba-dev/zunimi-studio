@@ -1,4 +1,5 @@
 #include "ui/FiltersDialog.h"
+#include "core/I18n.h"
 
 #include "ui/PropertiesView.h"
 
@@ -29,13 +30,13 @@ QString display(const char *id)
 FiltersDialog::FiltersDialog(obs_source_t *source, QWidget *parent)
 	: QDialog(parent), m_source(obs_source_get_ref(source))
 {
-	setWindowTitle("Filters: " + QString::fromUtf8(obs_source_get_name(source)));
+	setWindowTitle(L("Filters: ") + QString::fromUtf8(obs_source_get_name(source)));
 	resize(860, 560);
 
 	m_list = new QListWidget;
 	m_list->setFixedWidth(250);
-	m_list->setToolTip("Tick to switch a filter on or off. Filters run from top to bottom.");
-	auto *addButton = new QPushButton("+  Add filter");
+	m_list->setToolTip(L("Tick to switch a filter on or off. Filters run from top to bottom."));
+	auto *addButton = new QPushButton(L("+  Add filter"));
 	addButton->setObjectName("primary");
 	auto *menu = new QMenu(addButton);
 	const uint32_t flags = obs_source_get_output_flags(source);
@@ -45,19 +46,19 @@ FiltersDialog::FiltersDialog(obs_source_t *source, QWidget *parent)
 		menu->addAction(display(id), this, [this, id] { add(QString::fromUtf8(id)); });
 	};
 	if (flags & OBS_SOURCE_VIDEO) {
-		menu->addSection("Picture");
+		menu->addSection(L("Picture"));
 		for (const char *id : VIDEO_FILTERS)
 			offer(id);
 	}
 	if (flags & OBS_SOURCE_AUDIO) {
-		menu->addSection("Sound");
+		menu->addSection(L("Sound"));
 		for (const char *id : AUDIO_FILTERS)
 			offer(id);
 	}
 	addButton->setMenu(menu);
 	auto *up = new QPushButton("↑");
 	auto *down = new QPushButton("↓");
-	auto *remove = new QPushButton("Remove");
+	auto *remove = new QPushButton(L("Remove"));
 	for (QPushButton *b : {up, down})
 		b->setObjectName("icon");
 	auto *tools = new QHBoxLayout;

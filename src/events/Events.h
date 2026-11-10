@@ -178,6 +178,23 @@ public:
 	static bool parse(const QJsonObject &activity, StreamEvent *event);
 };
 
+// Services that only send webhooks (Kick follows and Kicks, Ko-fi tips), through the ZunimiLabs relay: the relay
+// receives them and passes them on over one websocket. Each install has its own relay channel (relay/id + key).
+class RelayEvents : public Connector {
+	Q_OBJECT
+public:
+	explicit RelayEvents(QObject *parent);
+	void start() override;
+	static QString base(); // https://relay.zunimilabs.online, or ZUNIMI_RELAY_URL for testing
+	static bool hasChannel();
+	static void ensureChannel(std::function<void(const QString &error)> done); // makes the channel once
+	static QString kofiLink(); // the webhook link to paste into Ko-fi (empty until there is a channel)
+	// Asks the relay for Kick's login page and opens it in the browser.
+	static void kickLogin(std::function<void(const QString &error)> done);
+	static void kickLogout();
+	static bool parse(const QJsonObject &message, StreamEvent *event);
+};
+
 // Streamlabs: donations and the platform events it relays, from its socket API with the socket token.
 class StreamlabsEvents : public Connector {
 	Q_OBJECT

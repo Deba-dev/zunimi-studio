@@ -1,4 +1,5 @@
 #include "core/Assist.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 #include "events/Events.h"
@@ -69,13 +70,13 @@ Assist::Assist(ObsCore *core, QObject *parent) : QObject(parent), m_core(core), 
 				r.worstDrop = m_minuteDrops[i];
 				r.worstMinute = i;
 			}
-		QString html = QString("<h3>Stream report</h3><table cellspacing=4>"
+		QString html = QString(L("<h3>Stream report</h3><table cellspacing=4>"
 				       "<tr><td>Live for</td><td><b>%1</b></td></tr>"
 				       "<tr><td>Average bitrate</td><td>%2 kbps</td></tr>"
 				       "<tr><td>Frames dropped by the network</td><td>%3%</td></tr>"
 				       "<tr><td>Average frame rate</td><td>%4 fps</td></tr>"
 				       "<tr><td>Busiest moment for the CPU</td><td>%5%</td></tr>"
-				       "<tr><td>Times Zunimi lowered the bitrate to keep you live</td><td>%6</td></tr>")
+				       "<tr><td>Times Zunimi lowered the bitrate to keep you live</td><td>%6</td></tr>"))
 				       .arg(clock(r.seconds))
 				       .arg(r.avgKbps, 0, 'f', 0)
 				       .arg(r.droppedPercent, 0, 'f', 2)
@@ -83,19 +84,19 @@ Assist::Assist(ObsCore *core, QObject *parent) : QObject(parent), m_core(core), 
 				       .arg(r.peakCpu, 0, 'f', 0)
 				       .arg(r.heals);
 		if (r.worstMinute >= 0 && r.worstDrop > 0.5)
-			html += QString("<tr><td>Roughest minute</td><td>minute %1 (%2% dropped)</td></tr>")
+			html += QString(L("<tr><td>Roughest minute</td><td>minute %1 (%2% dropped)</td></tr>"))
 					.arg(r.worstMinute + 1)
 					.arg(r.worstDrop, 0, 'f', 1);
 		html += "</table>";
 		QStringList tips;
 		if (r.droppedPercent > 1)
-			tips << "Your internet dropped frames. A lower bitrate, or a wired connection instead of Wi-Fi, would help.";
+			tips << L("Your internet dropped frames. A lower bitrate, or a wired connection instead of Wi-Fi, would help.");
 		if (r.peakCpu > 85)
-			tips << "Your CPU was nearly full. A hardware encoder (NVENC, AMF, QuickSync) or the Potato profile frees it.";
+			tips << L("Your CPU was nearly full. A hardware encoder (NVENC, AMF, QuickSync) or the Potato profile frees it.");
 		if (r.avgFps > 0 && r.avgFps < m_core->plan().fps * 0.95)
-			tips << "Frames were missed. Capping your game's FPS gives the stream room.";
+			tips << L("Frames were missed. Capping your game's FPS gives the stream room.");
 		if (tips.isEmpty())
-			tips << "Smooth stream. Nothing to change.";
+			tips << L("Smooth stream. Nothing to change.");
 		html += "<p>" + tips.join("<br>") + "</p>";
 		// keep it with the logs
 		QDir dir(Settings::dataDir() + "/reports");
@@ -152,31 +153,31 @@ QVector<Finding> Assist::preflight(bool forLive)
 			captureEmpty = true;
 	}
 	if (!anyVisible)
-		out << Finding{2, "This scene is empty: viewers would see a black screen.", "", ""};
+		out << Finding{2, L("This scene is empty: viewers would see a black screen."), "", ""};
 	else if (captureEmpty)
-		out << Finding{1, "A capture in this scene shows nothing yet (is the game or window open?).", "", ""};
+		out << Finding{1, L("A capture in this scene shows nothing yet (is the game or window open?)."), "", ""};
 	if (obs_source_t *mic = m_core->microphone()) {
 		if (obs_source_muted(mic))
-			out << Finding{2, "Your mic is muted.", "unmute_mic", "Unmute"};
+			out << Finding{2, L("Your mic is muted."), "unmute_mic", L("Unmute")};
 		else if (m_micQuietSince && QDateTime::currentMSecsSinceEpoch() - m_micQuietSince > 30000)
-			out << Finding{1, "Your mic hasn't picked up any sound for a while. Is the right mic chosen?", "", ""};
+			out << Finding{1, L("Your mic hasn't picked up any sound for a while. Is the right mic chosen?"), "", ""};
 	}
 	if (!forLive || st.value("stream/autoRecord", false).toBool()) {
 		const QString folder = st.value("record/folder").toString();
 		QStorageInfo disk(folder.isEmpty() ? QDir::homePath() : folder);
 		if (disk.isValid() && disk.bytesAvailable() < 3LL * 1024 * 1024 * 1024)
-			out << Finding{2, QString("Only %1 GB free where recordings go.").arg(disk.bytesAvailable() / 1073741824.0, 0, 'f', 1), "", ""};
+			out << Finding{2, QString(L("Only %1 GB free where recordings go.")).arg(disk.bytesAvailable() / 1073741824.0, 0, 'f', 1), "", ""};
 	}
 	const VideoPlan &p = m_core->plan();
 	if (p.encoder == "obs_x264" && m_core->hardware().anyHardwareEncoder())
-		out << Finding{1, "You're encoding on the CPU though your graphics card can do it for almost nothing.",
-			       "hw_encoder", "Use the graphics card"};
+		out << Finding{1, L("You're encoding on the CPU though your graphics card can do it for almost nothing."),
+			       "hw_encoder", L("Use the graphics card")};
 	if (p.encoder == "obs_x264" && m_core->hardware().cores <= 4 && p.height >= 1080)
-		out << Finding{2, "1080p on a 4-thread CPU will likely stutter.", "potato", "Use 720p"};
+		out << Finding{2, L("1080p on a 4-thread CPU will likely stutter."), "potato", L("Use 720p")};
 	if (forLive && p.bitrate > 6000 && st.value("stream/platform").toString() == "twitch")
-		out << Finding{1, "Twitch caps most channels at 6000 kbps; higher may be refused.", "twitch_bitrate", "Set 6000"};
+		out << Finding{1, L("Twitch caps most channels at 6000 kbps; higher may be refused."), "twitch_bitrate", L("Set 6000")};
 	if (forLive && m_onBattery)
-		out << Finding{1, "You're on battery: plug in, or the laptop may slow down mid-stream.", "", ""};
+		out << Finding{1, L("You're on battery: plug in, or the laptop may slow down mid-stream."), "", ""};
 	return out;
 }
 
@@ -185,13 +186,13 @@ Finding Assist::doctor(const Health &h) const
 {
 	if (h.encodeLag >= 1.0) {
 		if (m_core->plan().encoder == "obs_x264" && m_core->hardware().anyHardwareEncoder())
-			return {2, h.text, "hw_encoder", m_core->busy() ? "Use GPU next time" : "Use the graphics card"};
-		return {2, h.text, "potato", m_core->busy() ? "Lighter next time" : "Lighter settings"};
+			return {2, h.text, "hw_encoder", m_core->busy() ? L("Use GPU next time") : L("Use the graphics card")};
+		return {2, h.text, "potato", m_core->busy() ? L("Lighter next time") : L("Lighter settings")};
 	}
 	if (h.renderLag >= 1.0)
-		return {h.level, h.text, "pause_preview", "Pause the preview"};
+		return {h.level, h.text, "pause_preview", L("Pause the preview")};
 	if (h.dropped >= 1.0 && !Settings::get().value("stream/autoHeal", true).toBool())
-		return {h.level, h.text, "auto_heal", "Keep me live automatically"};
+		return {h.level, h.text, "auto_heal", L("Keep me live automatically")};
 	return {};
 }
 
@@ -219,15 +220,15 @@ void Assist::applyFix(const QString &id)
 			st.set("video/height", plan.height);
 			st.set("video/fps", plan.fps);
 			st.set("video/bitrate", plan.bitrate);
-			emit alarm("Saved: it takes effect the next time you go live or restart Zunimi Studio.");
+			emit alarm(L("Saved: it takes effect the next time you go live or restart Zunimi Studio."));
 		} else if (m_core->applyPlan(plan, &error)) {
 			if (id == "potato")
 				st.set("video/profile", "potato");
-			emit alarm("Done: " + encoderLabel(plan.encoder) + QString(", %1p%2, %3 kbps.").arg(plan.height).arg(plan.fps).arg(plan.bitrate));
+			emit alarm(L("Done: ") + encoderLabel(plan.encoder) + QString(L(", %1p%2, %3 kbps.")).arg(plan.height).arg(plan.fps).arg(plan.bitrate));
 		}
 	} else if (id == "pause_preview") {
 		st.set("preview/pauseWhileLive", true);
-		emit alarm("The preview pauses while you're live; that frees your graphics card.");
+		emit alarm(L("The preview pauses while you're live; that frees your graphics card."));
 	} else if (id == "auto_heal") {
 		st.set("stream/autoHeal", true);
 	}
@@ -271,7 +272,7 @@ void Assist::tick()
 	const int quietMinutes = st.value("alarms/micMinutes", 3).toInt();
 	if (m_live && quietMinutes > 0 && m_micQuietSince && !m_micWarned && now - m_micQuietSince > quietMinutes * 60000LL) {
 		m_micWarned = true;
-		emit alarm(QString("Your mic has been silent for %1 minutes. Is it unplugged, or the wrong one?").arg(quietMinutes));
+		emit alarm(QString(L("Your mic has been silent for %1 minutes. Is it unplugged, or the wrong one?")).arg(quietMinutes));
 	}
 	// black picture
 	if (m_live && st.value("alarms/black", true).toBool() && (now / 1000) % 3 == 0)
@@ -282,7 +283,7 @@ void Assist::tick()
 			m_blackSince = now;
 		if (!m_blackWarned && now - m_blackSince > 10000) {
 			m_blackWarned = true;
-			emit alarm("Your stream has been black for 10 seconds. A capture may have stopped (game minimized?).");
+			emit alarm(L("Your stream has been black for 10 seconds. A capture may have stopped (game minimized?)."));
 		}
 	} else if (luma >= 3.0) {
 		m_blackSince = 0;
@@ -295,7 +296,7 @@ void Assist::tick()
 		if (GetSystemPowerStatus(&power) && power.BatteryFlag != 128) {
 			const bool battery = power.ACLineStatus == 0;
 			if (battery && !m_onBattery && st.value("video/profile").toString() != "potato")
-				emit alarm("Your laptop is on battery. Plug in for the stream, or pick the Potato profile to save power.");
+				emit alarm(L("Your laptop is on battery. Plug in for the stream, or pick the Potato profile to save power."));
 			m_onBattery = battery;
 		}
 	}
@@ -440,7 +441,7 @@ void Assist::automation()
 			obs_source_release(scene);
 		}
 		if (!m_hiddenForPrivacy.isEmpty())
-			emit alarm("Privacy guard: a private window is in front, so your screen capture is hidden until you leave it.");
+			emit alarm(L("Privacy guard: a private window is in front, so your screen capture is hidden until you leave it."));
 	} else if (!privateNow && !m_hiddenForPrivacy.isEmpty()) {
 		obs_source_t *scene = obs_get_source_by_name(m_privacyScene.toUtf8().constData());
 		if (scene) {
@@ -480,10 +481,10 @@ void Assist::mark(const QString &label)
 	const OutputStats rec = m_core->recordStats();
 	const OutputStats live = m_core->streamStats();
 	if (!rec.active && !live.active && !m_core->replaying()) {
-		emit alarm("Mark moment works while recording, live or with the replay buffer on.");
+		emit alarm(L("Mark moment works while recording, live or with the replay buffer on."));
 		return;
 	}
-	const QString name = label.isEmpty() ? QString("Moment %1").arg(m_marks.size() + 1) : label;
+	const QString name = label.isEmpty() ? QString(L("Moment %1")).arg(m_marks.size() + 1) : label;
 	if (rec.active)
 		m_marks.append({rec.seconds, name});
 	if (m_core->replaying())
@@ -498,7 +499,8 @@ void Assist::mark(const QString &label)
 				    {"liveSeconds", live.active ? live.seconds : -1}};
 		f.write(QJsonDocument(o).toJson(QJsonDocument::Compact) + "\n");
 	}
-	emit alarm(QString("Marked: %1%2").arg(name, rec.active ? " (" + clock(rec.seconds) + " into the recording)" : QString()));
+	emit marked(name, rec.active ? double(rec.seconds) : -1.0);
+	emit alarm(QString(L("Marked: %1%2")).arg(name, rec.active ? " (" + clock(rec.seconds) + L(" into the recording)") : QString()));
 }
 
 void Assist::writeChapters(const QString &file)

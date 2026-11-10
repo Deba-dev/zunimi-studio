@@ -1,4 +1,5 @@
 #include "core/ObsCore.h"
+#include "core/I18n.h"
 
 #include "core/Addons.h"
 #include "core/Settings.h"
@@ -64,8 +65,8 @@ bool ObsCore::start(QString *error)
 {
 	const QString config = Settings::dataDir() + "/plugin_config";
 	QDir().mkpath(config);
-	if (!obs_startup("en-US", config.toUtf8().constData(), nullptr)) {
-		*error = "The video engine could not start.";
+	if (!obs_startup(i18n::obsLocale().toUtf8().constData(), config.toUtf8().constData(), nullptr)) {
+		*error = L("The video engine could not start.");
 		return false;
 	}
 	m_started = true;
@@ -74,7 +75,7 @@ bool ObsCore::start(QString *error)
 	audio.samples_per_sec = 48000;
 	audio.speakers = SPEAKERS_STEREO;
 	if (!obs_reset_audio(&audio)) {
-		*error = "The audio engine could not start.";
+		*error = L("The audio engine could not start.");
 		return false;
 	}
 
@@ -135,8 +136,8 @@ bool ObsCore::loadModules(QString *error)
 	obs_log_loaded_modules();
 	m_modules = list.loaded;
 	if (!list.loaded.contains("win-capture") || !list.loaded.contains("obs-x264")) {
-		*error = "Some parts of Zunimi Studio are missing (" + list.failed.join(", ") +
-			 "). Reinstalling should fix it.";
+		*error = L("Some parts of Zunimi Studio are missing (") + list.failed.join(", ") +
+			 L("). Reinstalling should fix it.");
 		return false;
 	}
 	return true;
@@ -159,8 +160,8 @@ bool ObsCore::resetVideo(const VideoPlan &plan, QString *error)
 	const int result = obs_reset_video(&ovi);
 	if (result != OBS_VIDEO_SUCCESS) {
 		*error = result == OBS_VIDEO_NOT_SUPPORTED
-				 ? "Your graphics card does not support DirectX 11, which Zunimi Studio needs."
-				 : "The graphics could not start. Updating your graphics driver usually fixes this.";
+				 ? L("Your graphics card does not support DirectX 11, which Zunimi Studio needs.")
+				 : L("The graphics could not start. Updating your graphics driver usually fixes this.");
 		return false;
 	}
 	m_plan = plan;
@@ -170,7 +171,7 @@ bool ObsCore::resetVideo(const VideoPlan &plan, QString *error)
 bool ObsCore::applyPlan(const VideoPlan &plan, QString *error)
 {
 	if (busy()) {
-		*error = "Stop the stream, recording, replay buffer and virtual camera first.";
+		*error = L("Stop the stream, recording, replay buffer and virtual camera first.");
 		return false;
 	}
 	const int oldWidth = m_plan.width;
@@ -202,13 +203,13 @@ bool ObsCore::applyPlan(const VideoPlan &plan, QString *error)
 // ---- scenes
 QVector<QPair<QString, QString>> ObsCore::transitionKinds()
 {
-	return {{"fade_transition", "Fade"},
-		{"cut_transition", "Cut"},
-		{"swipe_transition", "Swipe"},
-		{"slide_transition", "Slide"},
-		{"fade_to_color_transition", "Fade to colour"},
-		{"wipe_transition", "Luma wipe"},
-		{"obs_stinger_transition", "Stinger (your video)"}};
+	return {{"fade_transition", L("Fade")},
+		{"cut_transition", L("Cut")},
+		{"swipe_transition", L("Swipe")},
+		{"slide_transition", L("Slide")},
+		{"fade_to_color_transition", L("Fade to colour")},
+		{"wipe_transition", L("Luma wipe")},
+		{"obs_stinger_transition", L("Stinger (your video)")}};
 }
 
 obs_source_t *ObsCore::sceneSource(const QString &name) const
@@ -473,12 +474,12 @@ void ObsCore::setScene(const QString &name)
 
 QString ObsCore::addScene(const QString &name)
 {
-	const QString unique = uniqueName(name.trimmed().isEmpty() ? "Scene" : name.trimmed());
+	const QString unique = uniqueName(name.trimmed().isEmpty() ? L("Scene") : name.trimmed());
 	obs_source_t *source = obs_scene_get_source(obs_scene_create(unique.toUtf8().constData()));
 	m_scenes << source;
 	setCurrent(source, true);
 	save();
-	push("Add scene", [this, unique] { removeScene(unique); }, [this, unique] { addScene(unique); });
+	push(L("Add scene"), [this, unique] { removeScene(unique); }, [this, unique] { addScene(unique); });
 	return unique;
 }
 
@@ -487,7 +488,7 @@ QString ObsCore::duplicateScene(const QString &name)
 	obs_source_t *from = sceneSource(name);
 	if (!from)
 		return {};
-	const QString unique = uniqueName(name + " copy");
+	const QString unique = uniqueName(name + L(" copy"));
 	// Shared sources: the same webcam or game capture appears in both, which is what people expect.
 	obs_scene_t *copy = obs_scene_duplicate(obs_scene_from_source(from), unique.toUtf8().constData(),
 						OBS_SCENE_DUP_REFS);
@@ -495,7 +496,7 @@ QString ObsCore::duplicateScene(const QString &name)
 	m_scenes.insert(m_scenes.indexOf(from) + 1, source);
 	setCurrent(source, true);
 	save();
-	push("Copy scene", [this, unique] { removeScene(unique); }, [this, name] { duplicateScene(name); });
+	push(L("Copy scene"), [this, unique] { removeScene(unique); }, [this, name] { duplicateScene(name); });
 	return unique;
 }
 
@@ -514,7 +515,7 @@ bool ObsCore::renameScene(const QString &from, const QString &to)
 	obs_source_set_name(source, name.toUtf8().constData());
 	save();
 	emit scenesChanged();
-	push("Rename scene", [this, from, name] { renameScene(name, from); }, [this, from, name] { renameScene(from, name); });
+	push(L("Rename scene"), [this, from, name] { renameScene(name, from); }, [this, from, name] { renameScene(from, name); });
 	return true;
 }
 
@@ -583,7 +584,7 @@ bool ObsCore::removeScene(const QString &name)
 			obs_data_release(sceneData);
 			obs_data_array_release(own);
 		});
-		push("Remove scene", [restoreScene, shared] { restoreScene(); }, [this, name] { removeScene(name); });
+		push(L("Remove scene"), [restoreScene, shared] { restoreScene(); }, [this, name] { removeScene(name); });
 	} else {
 		obs_data_release(sceneData);
 		obs_data_array_release(own);
@@ -600,7 +601,7 @@ void ObsCore::moveScene(const QString &name, bool up)
 	m_scenes.swapItemsAt(i, j);
 	save();
 	emit scenesChanged();
-	push("Move scene", [this, name, up] { moveScene(name, !up); }, [this, name, up] { moveScene(name, up); });
+	push(L("Move scene"), [this, name, up] { moveScene(name, !up); }, [this, name, up] { moveScene(name, up); });
 }
 
 void ObsCore::setTransition(const QString &id, int ms)
@@ -764,7 +765,8 @@ QString ObsCore::uniqueName(const QString &base) const
 // ---- items
 obs_sceneitem_t *ObsCore::item(const QString &name) const
 {
-	return m_scene ? obs_scene_find_source(m_scene, name.toUtf8().constData()) : nullptr;
+	// also inside groups
+	return m_scene ? obs_scene_find_source_recursive(m_scene, name.toUtf8().constData()) : nullptr;
 }
 
 void ObsCore::place(obs_sceneitem_t *item, const QRectF &box)
@@ -785,7 +787,7 @@ void ObsCore::place(obs_sceneitem_t *item, const QRectF &box)
 void ObsCore::fit(const QString &name, Fit how)
 {
 	const double w = canvas().width(), h = canvas().height();
-	editItem(name, "Size and place", [&](obs_sceneitem_t *it) {
+	editItem(name, L("Size and place"), [&](obs_sceneitem_t *it) {
 		switch (how) {
 		case Fit::Fill:
 			place(it, {0, 0, w, h});
@@ -852,7 +854,7 @@ void ObsCore::recordAdd(const QString &name)
 	const QString scene = currentScene();
 	auto saved = std::make_shared<Saved>();
 	push(
-		"Add source",
+		L("Add source"),
 		[this, name, scene, saved] {
 			setScene(scene);
 			if (obs_sceneitem_t *it = item(name)) {
@@ -986,7 +988,7 @@ void ObsCore::removeSource(const QString &name)
 	save();
 	emit sceneChanged();
 	push(
-		"Remove source",
+		L("Remove source"),
 		[this, saved, scene, name, order] {
 			setScene(scene);
 			obs_source_t *src = obs_get_source_by_name(name.toUtf8().constData());
@@ -1027,24 +1029,24 @@ bool ObsCore::renameSource(const QString &from, const QString &to)
 		emit scenesChanged();
 	save();
 	emit sceneChanged();
-	push("Rename", [this, from, name] { renameSource(name, from); }, [this, from, name] { renameSource(from, name); });
+	push(L("Rename"), [this, from, name] { renameSource(name, from); }, [this, from, name] { renameSource(from, name); });
 	return true;
 }
 
 void ObsCore::setVisible(const QString &name, bool visible)
 {
-	editItem(name, visible ? "Show" : "Hide", [visible](obs_sceneitem_t *it) { obs_sceneitem_set_visible(it, visible); });
+	editItem(name, visible ? L("Show") : L("Hide"), [visible](obs_sceneitem_t *it) { obs_sceneitem_set_visible(it, visible); });
 }
 
 void ObsCore::setLocked(const QString &name, bool locked)
 {
-	editItem(name, locked ? "Lock" : "Unlock", [locked](obs_sceneitem_t *it) { obs_sceneitem_set_locked(it, locked); });
+	editItem(name, locked ? L("Lock") : L("Unlock"), [locked](obs_sceneitem_t *it) { obs_sceneitem_set_locked(it, locked); });
 	emit sceneChanged();
 }
 
 void ObsCore::moveSource(const QString &name, bool up)
 {
-	editItem(name, "Move", [up](obs_sceneitem_t *it) {
+	editItem(name, L("Move"), [up](obs_sceneitem_t *it) {
 		obs_sceneitem_set_order(it, up ? OBS_ORDER_MOVE_UP : OBS_ORDER_MOVE_DOWN);
 	});
 	emit sceneChanged();
@@ -1056,7 +1058,7 @@ void ObsCore::moveSourceTo(const QString &name, int indexFromTop)
 	if (!it || indexFromTop < 0)
 		return;
 	const int count = int(items().size());
-	beginEdit("Move");
+	beginEdit(L("Move"));
 	obs_sceneitem_set_order_position(it, std::clamp(count - 1 - indexFromTop, 0, count - 1));
 	endEdit();
 	emit sceneChanged();
@@ -1067,17 +1069,84 @@ QVector<SceneItem> ObsCore::items() const
 	QVector<SceneItem> list;
 	if (!m_scene)
 		return list;
+	auto entry = [](obs_sceneitem_t *it, const QString &group) {
+		obs_source_t *source = obs_sceneitem_get_source(it);
+		SceneItem s{nameOf(source), QString::fromUtf8(obs_source_get_id(source)), obs_sceneitem_visible(it),
+			    obs_sceneitem_locked(it)};
+		s.isGroup = obs_sceneitem_is_group(it);
+		s.group = group;
+		return s;
+	};
+	struct Ctx {
+		QVector<SceneItem> *out;
+		decltype(entry) *make;
+	} ctx{&list, &entry};
+	// libobs lists bottom first; the list here is top first, each group followed by its own sources (top first)
 	obs_scene_enum_items(
 		m_scene,
 		[](obs_scene_t *, obs_sceneitem_t *it, void *param) {
-			auto *out = static_cast<QVector<SceneItem> *>(param);
-			obs_source_t *source = obs_sceneitem_get_source(it);
-			out->prepend({nameOf(source), QString::fromUtf8(obs_source_get_id(source)),
-				      obs_sceneitem_visible(it), obs_sceneitem_locked(it)});
+			auto *c = static_cast<Ctx *>(param);
+			QVector<SceneItem> block{(*c->make)(it, {})};
+			if (obs_sceneitem_is_group(it)) {
+				struct Inner {
+					QVector<SceneItem> *block;
+					decltype(c->make) make;
+					QString group;
+				} inner{&block, c->make, block.first().name};
+				obs_sceneitem_group_enum_items(
+					it,
+					[](obs_scene_t *, obs_sceneitem_t *child, void *p) {
+						auto *in = static_cast<Inner *>(p);
+						in->block->insert(1, (*in->make)(child, in->group));
+						return true;
+					},
+					&inner);
+			}
+			for (int i = block.size() - 1; i >= 0; --i)
+				c->out->prepend(block[i]);
 			return true;
 		},
-		&list);
+		&ctx);
 	return list;
+}
+
+QString ObsCore::groupItems(const QStringList &names, const QString &group)
+{
+	QVector<obs_sceneitem_t *> chosen;
+	for (const QString &n : names) {
+		obs_sceneitem_t *it = m_scene ? obs_scene_find_source(m_scene, n.toUtf8().constData()) : nullptr; // top level only
+		if (it && !obs_sceneitem_is_group(it))
+			chosen << it;
+	}
+	if (chosen.size() < 1)
+		return {};
+	const QString unique = uniqueName(group.trimmed().isEmpty() ? L("Group") : group.trimmed());
+	if (!obs_scene_insert_group(m_scene, unique.toUtf8().constData(), chosen.data(), size_t(chosen.size())))
+		return {};
+	save();
+	emit sceneChanged();
+	push(L("Group"), [this, unique] { ungroup(unique); }, [this, names, unique] { groupItems(names, unique); });
+	return unique;
+}
+
+bool ObsCore::ungroup(const QString &group)
+{
+	obs_sceneitem_t *it = m_scene ? obs_scene_find_source(m_scene, group.toUtf8().constData()) : nullptr;
+	if (!it || !obs_sceneitem_is_group(it))
+		return false;
+	QStringList names;
+	obs_sceneitem_group_enum_items(
+		it,
+		[](obs_scene_t *, obs_sceneitem_t *child, void *p) {
+			static_cast<QStringList *>(p)->append(nameOf(obs_sceneitem_get_source(child)));
+			return true;
+		},
+		&names);
+	obs_sceneitem_group_ungroup(it);
+	save();
+	emit sceneChanged();
+	push(L("Ungroup"), [this, names, group] { groupItems(names, group); }, [this, group] { ungroup(group); });
+	return true;
 }
 
 void ObsCore::rescaleItems(double ratio)

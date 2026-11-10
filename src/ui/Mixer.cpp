@@ -1,4 +1,5 @@
 #include "ui/Mixer.h"
+#include "core/I18n.h"
 
 #include "core/ObsCore.h"
 #include "core/Settings.h"
@@ -116,7 +117,7 @@ Mixer::Mixer(ObsCore *core, QWidget *parent) : QWidget(parent), m_core(core)
 	auto *outer = new QVBoxLayout(this);
 	outer->setContentsMargins(12, 12, 12, 12);
 	outer->setSpacing(8);
-	auto *title = new QLabel("Audio");
+	auto *title = new QLabel(L("Audio"));
 	title->setObjectName("h2");
 	auto *area = new QScrollArea;
 	area->setWidgetResizable(true);
@@ -129,8 +130,8 @@ Mixer::Mixer(ObsCore *core, QWidget *parent) : QWidget(parent), m_core(core)
 	m_list->setSpacing(12);
 	m_list->addStretch();
 	area->setWidget(inner);
-	auto *cleanup = new QCheckBox("Clean up mic noise");
-	cleanup->setToolTip("RNNoise: removes keyboard, fan and room noise. Light on the CPU.");
+	auto *cleanup = new QCheckBox(L("Clean up mic noise"));
+	cleanup->setToolTip(L("RNNoise: removes keyboard, fan and room noise. Light on the CPU."));
 	cleanup->setChecked(core->micCleanup());
 	cleanup->setEnabled(core->microphone() != nullptr);
 	connect(cleanup, &QCheckBox::toggled, core, &ObsCore::setMicCleanup);
@@ -175,7 +176,7 @@ QWidget *Mixer::channel(obs_source_t *source)
 	col->setContentsMargins(0, 0, 0, 0);
 	col->setSpacing(4);
 	const QString key = settingsKey(source, m_core);
-	const QString name = key == "desktop" ? "Desktop" : key == "mic" ? "Mic" : QString::fromUtf8(obs_source_get_name(source));
+	const QString name = key == "desktop" ? L("Desktop") : key == "mic" ? L("Mic") : QString::fromUtf8(obs_source_get_name(source));
 
 	auto *head = new QHBoxLayout;
 	head->setSpacing(4);
@@ -185,17 +186,20 @@ QWidget *Mixer::channel(obs_source_t *source)
 	mute->setObjectName("icon");
 	mute->setCheckable(true);
 	mute->setCursor(Qt::PointingHandCursor);
-	auto *filters = new QPushButton("Filters");
+	auto *filters = new QPushButton(L("Filters"));
 	filters->setObjectName("icon");
 	filters->setCursor(Qt::PointingHandCursor);
-	filters->setToolTip("Noise gate, compressor, gain, EQ...");
+	filters->setToolTip(L("Noise gate, compressor, gain, EQ..."));
 	auto *more = new QPushButton("⋯");
 	more->setObjectName("icon");
 	more->setCursor(Qt::PointingHandCursor);
-	more->setToolTip("Listen in headphones, sync offset, balance, recording tracks");
+	more->setToolTip(L("Listen in headphones, sync offset, balance, recording tracks"));
 	head->addWidget(label, 1);
 	head->addWidget(mute);
 	head->addWidget(filters);
+	const bool easy = Settings::get().value("ui/simple", false).toBool(); // Simple mode: just level and mute
+	filters->setVisible(!easy);
+	more->setVisible(!easy);
 	head->addWidget(more);
 
 	auto *meter = new LevelMeter(source);
@@ -208,14 +212,14 @@ QWidget *Mixer::channel(obs_source_t *source)
 	db->setFixedWidth(52);
 	db->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 	auto showDb = [db](float mul) {
-		db->setText(mul <= 0.0f ? "-inf dB" : QString("%1 dB").arg(20.0 * std::log10(mul), 0, 'f', 1));
+		db->setText(mul <= 0.0f ? L("-inf dB") : QString(L("%1 dB")).arg(20.0 * std::log10(mul), 0, 'f', 1));
 	};
 	showDb(obs_source_get_volume(source));
 	auto *row = new QHBoxLayout;
 	row->addWidget(slider, 1);
 	row->addWidget(db);
 
-	auto setMuteText = [mute](bool on) { mute->setText(on ? "Muted" : "Mute"); };
+	auto setMuteText = [mute](bool on) { mute->setText(on ? L("Muted") : L("Mute")); };
 	mute->setChecked(obs_source_muted(source));
 	setMuteText(mute->isChecked());
 

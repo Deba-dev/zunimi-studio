@@ -1,4 +1,5 @@
 #include "core/Updater.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 #include "version.h"
@@ -20,7 +21,7 @@
 #include <util/base.h>
 
 namespace {
-const QString REPO = "Deba-dev/zunimi-studio";
+const QString REPO = L("Deba-dev/zunimi-studio");
 const QString API = "https://api.github.com/repos/" + REPO + "/releases?per_page=20";
 const QString API_ASSET = "https://api.github.com/repos/" + REPO + "/releases/assets/";
 const QByteArray AGENT = "ZunimiStudio-updater";
@@ -116,7 +117,7 @@ void Updater::check(bool manual)
 		if (reply->error() != QNetworkReply::NoError) {
 			blog(LOG_WARNING, "update check failed: %s", reply->errorString().toUtf8().constData());
 			if (manual) // a failed background check must never bother anyone
-				emit failed("Could not check for updates (" + reply->errorString().left(60) + ").");
+				emit failed(L("Could not check for updates (") + reply->errorString().left(60) + ").");
 			return;
 		}
 		// ZUNIMI_PRETEND_VERSION lets the self-test act as an older build and fetch a real installer
@@ -160,7 +161,7 @@ void Updater::download(const UpdateInfo &info)
 	if (m_busy)
 		return;
 	if (!isReleaseAsset(info.asset)) {
-		emit failed("That update did not come from Zunimi Studio's releases, so it was not downloaded.");
+		emit failed(L("That update did not come from Zunimi Studio's releases, so it was not downloaded."));
 		return;
 	}
 	m_busy = true;
@@ -176,7 +177,7 @@ void Updater::fetch()
 {
 	m_file.setFileName(installerPath(m_info.version));
 	if (!m_file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-		giveUp("The update could not be saved in your Temp folder (" + m_file.errorString() + ").");
+		giveUp(L("The update could not be saved in your Temp folder (") + m_file.errorString() + ").");
 		return;
 	}
 	m_sha.reset();
@@ -228,9 +229,9 @@ void Updater::fetchDone()
 			fetch();
 			return;
 		}
-		giveUp(status >= 500 ? "GitHub's download server is not answering right now. Try the update again in a "
-				       "little while."
-				     : "The update download failed (" + reply->errorString().left(60) + ").");
+		giveUp(status >= 500 ? L("GitHub's download server is not answering right now. Try the update again in a "
+				       "little while.")
+				     : L("The update download failed (") + reply->errorString().left(60) + ").");
 		return;
 	}
 	const qint64 total = reply->header(QNetworkRequest::ContentLengthHeader).toLongLong();
@@ -238,7 +239,7 @@ void Updater::fetchDone()
 	if ((total > 0 && m_done != total) ||
 	    (want.startsWith("sha256:") && want.mid(7) != QString::fromLatin1(m_sha.result().toHex()))) {
 		m_file.remove();
-		giveUp("The update did not download correctly, so it was thrown away. Please try again.");
+		giveUp(L("The update did not download correctly, so it was thrown away. Please try again."));
 		return;
 	}
 	m_busy = false;
@@ -275,7 +276,7 @@ QString Updater::afterStart()
 	if (!pending.isEmpty()) {
 		s.set("update/pending", QString());
 		if (newer(parseVersion(pending), parseVersion(ZUNIMI_VERSION)))
-			message = QString("The update to %1 did not finish, so you are still on %2.").arg(pending,
+			message = QString(L("The update to %1 did not finish, so you are still on %2.")).arg(pending,
 												 ZUNIMI_VERSION);
 	}
 	QDir temp = QDir::temp();

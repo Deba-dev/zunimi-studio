@@ -9,6 +9,8 @@
 class Assist;
 class Hotkeys;
 class Mixer;
+class Remote;
+struct SetupChoices;
 class ObsCore;
 class PreviewWidget;
 class WindowModes;
@@ -28,6 +30,12 @@ public:
 	explicit MainWindow(ObsCore *core);
 	WindowModes *modes() const { return m_modes; }
 	void checkForUpdates();
+	Remote *remote() const { return m_remote; }
+	void applyRemote();
+	void runSetup();                          // the first-time setup (also from Menu)
+	void applySetup(const SetupChoices &c);
+	static bool simple();                     // Simple mode: only what's needed to go live and record
+	void setSimple(bool on);
 
 protected:
 	void keyPressEvent(QKeyEvent *event) override;
@@ -62,7 +70,7 @@ private:
 	void addSource(const QString &kind);
 	void addScreen(const QString &id, const QString &label);
 	void addAllScreens();
-	void addOverlay(const QString &kind);
+	void addOverlay(const QString &kind, bool quiet = false);
 	void addBrowser(bool overlayLink);
 	bool ensureBrowser();
 	void restartApp();
@@ -91,6 +99,7 @@ private:
 	void updatePreview();
 	void updateButtons();
 	void say(const QString &text, bool bad = false);
+	void applyLevel();
 	QString quitWouldStop() const;
 	// updates
 	void showUpdate(const QString &text, const QString &go, const QString &later);
@@ -98,6 +107,7 @@ private:
 
 	ObsCore *m_core;
 	Assist *m_assist = nullptr;
+	Remote *m_remote = nullptr;
 	QPushButton *m_fix = nullptr;
 	QString m_fixId;
 	WindowModes *m_modes;

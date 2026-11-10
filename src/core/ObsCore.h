@@ -35,6 +35,8 @@ struct SceneItem {
 	QString kind; // libobs source id
 	bool visible = true;
 	bool locked = false;
+	bool isGroup = false;
+	QString group; // the group it is in, or empty
 };
 
 // Everything about how one item sits in its scene, so an edit can be undone exactly.
@@ -113,7 +115,10 @@ public:
 	obs_source_t *editSceneSource() const { return m_sceneSource; } // UI thread only
 
 	// items of the current scene
-	QVector<SceneItem> items() const; // top first
+	QVector<SceneItem> items() const; // top first; a group's sources follow it
+	// groups: sources that move, hide and lock together
+	QString groupItems(const QStringList &names, const QString &group); // the new group's name, or empty
+	bool ungroup(const QString &group);
 	obs_scene_t *scene() const { return m_scene; }
 	obs_sceneitem_t *item(const QString &name) const;
 	obs_source_t *addSource(const char *kind, const QString &name, obs_data_t *settings, Fit fit);

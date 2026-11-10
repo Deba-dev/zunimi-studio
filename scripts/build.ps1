@@ -49,6 +49,16 @@ if (Test-Path $core) { Remove-Item $core -Recurse -Force }
 foreach ($m in $modules) { Copy-Item "$ObsInstall\core\$m" (Join-Path $core $m) -Recurse -Force }
 Get-ChildItem $stage -Recurse -Filter *.pdb | Where-Object { $_.Name -notin "obs.pdb","zunimi-studio.pdb" } | Remove-Item
 
+# Game capture: OBS Studio's official hook, signed by the OBS Project, so anti-cheat (Vanguard and others) lets it into
+# the game. Our own build of it is unsigned. A release is never made without it.
+try {
+    $signedHook = & (Join-Path $PSScriptRoot "get-signed-hook.ps1")
+    Copy-Item "$signedHook\*" (Join-Path $core "win-capture\data") -Force
+} catch {
+    if ($Package) { throw "No signed game-capture hook, so no release: $_" }
+    Write-Warning "Using the unsigned game-capture hook (anti-cheat games won't allow it): $_"
+}
+
 # The browser source (Chromium, ~300 MB) is an add-on: build\addon-browser\core\obs-browser, zipped by -Package as
 # ZunimiStudio-BrowserAddon-<version>.zip and downloaded by the app only when someone wants a browser source.
 $browserSrc = "$ObsSource\build_zunimi\rundir\$Config\core\obs-browser"

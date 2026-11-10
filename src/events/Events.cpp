@@ -1,4 +1,5 @@
 #include "events/Events.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 #include "net/WebSocket.h"
@@ -83,23 +84,25 @@ QString StreamEvent::amountText() const
 {
 	if (type == "tip" || type == "superchat")
 		return money(amount, currency);
+	if (type == "bits" && currency == "KICKS")
+		return QString(L("%1 Kicks")).arg(qlonglong(amount));
 	if (type == "bits")
-		return QString("%1 bits").arg(qlonglong(amount));
+		return QString(L("%1 bits")).arg(qlonglong(amount));
 	if (type == "raid")
-		return QString("%1 viewers").arg(count);
+		return QString(L("%1 viewers")).arg(count);
 	if (type == "gift")
-		return QString("%1 gift%2").arg(count).arg(count == 1 ? "" : "s");
+		return QString(L("%1 gift%2")).arg(count).arg(count == 1 ? "" : "s");
 	if (type == "resub" || (type == "member" && count > 1))
-		return QString("%1 months").arg(count);
+		return QString(L("%1 months")).arg(count);
 	return {};
 }
 
 QString StreamEvent::label() const
 {
 	static const QHash<QString, QString> names = {
-		{"follow", "Follow"}, {"sub", "Sub"},         {"resub", "Resub"},   {"gift", "Gift subs"},
-		{"bits", "Bits"},     {"raid", "Raid"},       {"tip", "Tip"},       {"superchat", "Super Chat"},
-		{"member", "Member"}, {"redeem", "Redeem"}};
+		{"follow", L("Follow")}, {"sub", L("Sub")},         {"resub", L("Resub")},   {"gift", L("Gift subs")},
+		{"bits", L("Bits")},     {"raid", L("Raid")},       {"tip", L("Tip")},       {"superchat", L("Super Chat")},
+		{"member", L("Member")}, {"redeem", L("Redeem")}};
 	return names.value(type, type);
 }
 
@@ -117,6 +120,7 @@ EventHub::EventHub()
 	m_connectors.insert("kick", new KickChat(this));
 	m_connectors.insert("streamelements", new StreamElementsEvents(this));
 	m_connectors.insert("streamlabs", new StreamlabsEvents(this));
+	m_connectors.insert("relay", new RelayEvents(this));
 	Settings &st = Settings::get();
 	for (const QString &k : {"follows", "subs", "bits", "tips", "members"})
 		m_totals.insert(k, st.value("events/total_" + QString(k), 0.0).toDouble());
@@ -236,7 +240,7 @@ QString EventHub::top(const QString &type) const
 
 void EventHub::test(const QString &type)
 {
-	static const QStringList names = {"Aarav", "PixelNinja", "Kavya_plays", "NightOwl", "Rohan_07", "Sana"};
+	static const QStringList names = {L("Aarav"), L("PixelNinja"), L("Kavya_plays"), L("NightOwl"), L("Rohan_07"), L("Sana")};
 	StreamEvent e;
 	e.platform = "test";
 	e.type = type;
@@ -245,17 +249,17 @@ void EventHub::test(const QString &type)
 	if (type == "tip" || type == "superchat") {
 		e.amount = QList<double>{50, 100, 500, 1000}[QRandomGenerator::global()->bounded(4)];
 		e.currency = Settings::get().value("events/currency", "INR").toString();
-		e.message = "Bhai kya clutch tha! 🔥";
+		e.message = L("Bhai kya clutch tha! 🔥");
 	} else if (type == "bits") {
 		e.amount = 500;
-		e.message = "Cheer500 GG";
+		e.message = L("Cheer500 GG");
 	} else if (type == "raid") {
 		e.count = 42;
 	} else if (type == "gift") {
 		e.count = 5;
 	} else if (type == "resub") {
 		e.count = 7;
-		e.message = "7 months already!";
+		e.message = L("7 months already!");
 	}
 	emitEvent(e);
 }
@@ -288,14 +292,14 @@ void Connector::stop()
 	m_retry->stop();
 	if (m_ws)
 		m_ws->close();
-	hub().setStatus(m_key, "Off", false);
+	hub().setStatus(m_key, L("Off"), false);
 }
 
 void Connector::retryLater(const QString &why)
 {
 	m_failures++;
 	const int seconds = std::min(120, 3 * (1 << std::min(m_failures, 5)));
-	hub().setStatus(m_key, QString("%1 Trying again in %2 s.").arg(why).arg(seconds), false);
+	hub().setStatus(m_key, QString(L("%1 Trying again in %2 s.")).arg(why).arg(seconds), false);
 	m_retry->start(seconds * 1000);
 }
 
@@ -321,7 +325,7 @@ TwitchChat::TwitchChat(QObject *parent) : Connector("twitch", parent)
 				continue;
 			}
 			if (line.contains(" JOIN #"))
-				ok("Reading #" + m_channel + " chat");
+				ok(L("Reading #") + m_channel + L(" chat"));
 			ChatMessage chat;
 			StreamEvent event;
 			if (!parseLine(line, &chat, &event))
@@ -339,11 +343,11 @@ void TwitchChat::start()
 	m_channel = Settings::get().value("events/twitchChannel").toString().trimmed().toLower().remove('#');
 	m_channel.remove(QRegularExpression("^https?://(www\\.)?twitch\\.tv/"));
 	if (m_channel.isEmpty()) {
-		hub().setStatus(m_key, "Not set up", false);
+		hub().setStatus(m_key, L("Not set up"), false);
 		return;
 	}
 	m_running = true;
-	hub().setStatus(m_key, "Connecting...", false);
+	hub().setStatus(m_key, L("Connecting..."), false);
 	socket()->open(QUrl("wss://irc-ws.chat.twitch.tv:443"));
 }
 
@@ -439,7 +443,7 @@ TwitchFollows::TwitchFollows(QObject *parent) : Connector("twitch_follows", pare
 			e.user = ev.value("user_name").toString();
 			hub().emitEvent(e);
 		} else if (type == "revocation") {
-			retryLater("Twitch stopped the follow alerts (the login may have expired).");
+			retryLater(L("Twitch stopped the follow alerts (the login may have expired)."));
 		}
 	});
 }
@@ -453,11 +457,11 @@ QString TwitchFollows::clientId()
 void TwitchFollows::start()
 {
 	if (Settings::get().secret("events/twitchToken").isEmpty() || clientId().isEmpty()) {
-		hub().setStatus(m_key, clientId().isEmpty() ? "Needs a Twitch app id" : "Not logged in", false);
+		hub().setStatus(m_key, clientId().isEmpty() ? L("Needs a Twitch app id") : L("Not logged in"), false);
 		return;
 	}
 	m_running = true;
-	hub().setStatus(m_key, "Connecting...", false);
+	hub().setStatus(m_key, L("Connecting..."), false);
 	socket()->open(QUrl("wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30"));
 }
 
@@ -478,16 +482,16 @@ void TwitchFollows::subscribe(const QString &session)
 		reply->deleteLater();
 		const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 		if (code == 202) {
-			ok("Follow alerts on");
+			ok(L("Follow alerts on"));
 		} else if (code == 401) {
 			refresh([this, session](bool good) {
 				if (good)
 					subscribe(session);
 				else
-					stop(), hub().setStatus(m_key, "Log in to Twitch again (Settings > Connections)", false);
+					stop(), hub().setStatus(m_key, L("Log in to Twitch again (Settings > Connections)"), false);
 			});
 		} else {
-			retryLater(QString("Twitch said no to follow alerts (%1).").arg(code));
+			retryLater(QString(L("Twitch said no to follow alerts (%1).")).arg(code));
 		}
 	});
 }
@@ -519,7 +523,7 @@ void TwitchFollows::login(std::function<void(const QString &, const QString &)> 
 {
 	const QString id = clientId();
 	if (id.isEmpty()) {
-		done("This build has no Twitch app id yet. Add one in Settings > Connections > Advanced.");
+		done(L("This build has no Twitch app id yet. Add one in Settings > Connections > Advanced."));
 		return;
 	}
 	const QString scopes = "moderator:read:followers user:write:chat";
@@ -534,7 +538,7 @@ void TwitchFollows::login(std::function<void(const QString &, const QString &)> 
 		const QJsonObject r = QJsonDocument::fromJson(reply->readAll()).object();
 		const QString device = r.value("device_code").toString();
 		if (device.isEmpty()) {
-			done("Twitch did not start the login: " + r.value("message").toString());
+			done(L("Twitch did not start the login: ") + r.value("message").toString());
 			return;
 		}
 		show(r.value("user_code").toString(), r.value("verification_uri").toString());
@@ -545,7 +549,7 @@ void TwitchFollows::login(std::function<void(const QString &, const QString &)> 
 		QObject::connect(timer, &QTimer::timeout, timer, [timer, id, scopes, device, until, done] {
 			if (QDateTime::currentSecsSinceEpoch() > until) {
 				timer->deleteLater();
-				done("The code ran out. Try again.");
+				done(L("The code ran out. Try again."));
 				return;
 			}
 			QUrlQuery t;
@@ -605,12 +609,12 @@ void YouTubeChat::stop()
 void YouTubeChat::start()
 {
 	if (Settings::get().value("events/youtube").toString().trimmed().isEmpty()) {
-		hub().setStatus(m_key, "Not set up", false);
+		hub().setStatus(m_key, L("Not set up"), false);
 		return;
 	}
 	m_running = true;
 	m_first = true;
-	hub().setStatus(m_key, "Looking for your live stream...", false);
+	hub().setStatus(m_key, L("Looking for your live stream..."), false);
 	findVideo();
 }
 
@@ -641,7 +645,7 @@ void YouTubeChat::findVideo()
 		static const QRegularExpression canonical("<link rel=\"canonical\" href=\"https://www\\.youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})\"");
 		const auto m = canonical.match(html);
 		if (!m.hasMatch() || !html.contains("\"isLive\":true")) {
-			hub().setStatus(m_key, "Waiting for you to go live on YouTube...", false);
+			hub().setStatus(m_key, L("Waiting for you to go live on YouTube..."), false);
 			m_retry->start(60000); // check again in a minute
 			return;
 		}
@@ -668,10 +672,10 @@ void YouTubeChat::openChat(const QString &video)
 		m_version = ver.match(html).captured(1);
 		m_continuation = cont.match(html).captured(1);
 		if (m_key.isEmpty() || m_continuation.isEmpty()) {
-			retryLater("This stream's chat is off or not live yet.");
+			retryLater(L("This stream's chat is off or not live yet."));
 			return;
 		}
-		ok("Reading YouTube chat");
+		ok(L("Reading YouTube chat"));
 		poll();
 	});
 }
@@ -697,7 +701,7 @@ void YouTubeChat::poll()
 						 .value("liveChatContinuation")
 						 .toObject();
 		if (live.isEmpty()) {
-			retryLater("YouTube chat ended or stopped answering.");
+			retryLater(L("YouTube chat ended or stopped answering."));
 			return;
 		}
 		QVector<ChatMessage> chat;
@@ -782,7 +786,7 @@ KickChat::KickChat(QObject *parent) : Connector("kick", parent)
 								 {"data", QJsonObject{{"auth", ""}, {"channel", "chatrooms." + room + ".v2"}}}})
 					       .toJson(QJsonDocument::Compact));
 		} else if (ev == "pusher_internal:subscription_succeeded") {
-			ok("Reading Kick chat");
+			ok(L("Reading Kick chat"));
 		} else if (ev == "pusher:ping") {
 			m_ws->sendText("{\"event\":\"pusher:pong\",\"data\":{}}");
 		} else {
@@ -803,7 +807,7 @@ void KickChat::start()
 	QString slug = Settings::get().value("events/kickChannel").toString().trimmed().toLower();
 	slug.remove(QRegularExpression("^https?://(www\\.)?kick\\.com/"));
 	if (slug.isEmpty()) {
-		hub().setStatus(m_key, "Not set up", false);
+		hub().setStatus(m_key, L("Not set up"), false);
 		return;
 	}
 	m_running = true;
@@ -812,7 +816,7 @@ void KickChat::start()
 		join(room);
 		return;
 	}
-	hub().setStatus(m_key, "Finding the chat room...", false);
+	hub().setStatus(m_key, L("Finding the chat room..."), false);
 	QNetworkRequest req(QUrl("https://kick.com/api/v2/channels/" + slug));
 	req.setRawHeader("User-Agent", YT_UA);
 	req.setRawHeader("Accept", "application/json");
@@ -822,7 +826,7 @@ void KickChat::start()
 		const QString id = QString::number(
 			QJsonDocument::fromJson(reply->readAll()).object().value("chatroom").toObject().value("id").toInteger());
 		if (id == "0") {
-			retryLater("Kick didn't share the chat room. Paste its number in Settings > Connections.");
+			retryLater(L("Kick didn't share the chat room. Paste its number in Settings > Connections."));
 			return;
 		}
 		Settings::get().set("events/kickRoom", id);
@@ -833,7 +837,7 @@ void KickChat::start()
 
 void KickChat::join(const QString &)
 {
-	hub().setStatus(m_key, "Connecting...", false);
+	hub().setStatus(m_key, L("Connecting..."), false);
 	socket()->open(QUrl("wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false"));
 }
 
@@ -875,6 +879,164 @@ bool KickChat::parse(const QJsonObject &packet, ChatMessage *chat, StreamEvent *
 	return false;
 }
 
+// ---- ZunimiLabs relay (Kick webhooks, Ko-fi)
+RelayEvents::RelayEvents(QObject *parent) : Connector("relay", parent)
+{
+	auto *ping = new QTimer(this);
+	ping->setInterval(30000); // the relay answers pings without waking up; they keep proxies from closing the socket
+	connect(ping, &QTimer::timeout, this, [this] {
+		if (m_ws && m_ws->isOpen())
+			m_ws->sendText(QStringLiteral("{\"type\":\"ping\"}"));
+	});
+	connect(socket(), &WebSocket::opened, this, [this, ping] {
+		ping->start();
+		const QJsonObject hello{{"type", "hello"}, {"kofiToken", Settings::get().secret("events/kofiToken")}};
+		m_ws->sendText(QString::fromUtf8(QJsonDocument(hello).toJson(QJsonDocument::Compact)));
+	});
+	connect(socket(), &WebSocket::textMessage, this, [this](const QString &text) {
+		const QJsonObject m = QJsonDocument::fromJson(text.toUtf8()).object();
+		const QString type = m.value("type").toString();
+		if (type == "ready" || type == "kick") {
+			Settings &st = Settings::get();
+			const QString kick = type == "ready" ? m.value("kick").toObject().value("name").toString() : m.value("name").toString();
+			st.set("events/kickRelayName", kick);
+			if (!kick.isEmpty())
+				st.set("events/kickRelayPending", false);
+			if (type == "ready")
+				st.set("events/kofiLinked", m.value("kofi").toBool());
+			QStringList parts;
+			if (!kick.isEmpty())
+				parts << QString(L("Kick alerts for %1")).arg(kick);
+			if (st.value("events/kofiLinked").toBool())
+				parts << L("Ko-fi tips");
+			ok(parts.isEmpty() ? L("Relay connected") : parts.join(", "));
+			return;
+		}
+		StreamEvent e;
+		if (type == "event" && parse(m, &e))
+			hub().emitEvent(e);
+	});
+}
+
+QString RelayEvents::base()
+{
+	const QString custom = qEnvironmentVariable("ZUNIMI_RELAY_URL");
+	return custom.isEmpty() ? QString("https://relay.zunimilabs.online") : custom;
+}
+
+bool RelayEvents::hasChannel()
+{
+	return !Settings::get().value("relay/id").toString().isEmpty() && !Settings::get().secret("relay/key").isEmpty();
+}
+
+void RelayEvents::start()
+{
+	Settings &st = Settings::get();
+	const bool wanted = !st.secret("events/kofiToken").isEmpty() || !st.value("events/kickRelayName").toString().isEmpty() ||
+			    st.value("events/kickRelayPending").toBool();
+	if (!hasChannel() || !wanted) {
+		hub().setStatus(m_key, L("Not set up"), false);
+		return;
+	}
+	m_running = true;
+	hub().setStatus(m_key, L("Connecting..."), false);
+	QUrl url(base() + "/v1/ws");
+	url.setScheme(url.scheme() == "https" ? "wss" : "ws");
+	QUrlQuery q;
+	q.addQueryItem("id", st.value("relay/id").toString());
+	q.addQueryItem("key", QString::fromLatin1(QUrl::toPercentEncoding(st.secret("relay/key"))));
+	url.setQuery(q);
+	socket()->open(url);
+}
+
+void RelayEvents::ensureChannel(std::function<void(const QString &)> done)
+{
+	if (hasChannel()) {
+		done({});
+		return;
+	}
+	QNetworkRequest req(QUrl(base() + "/v1/channels"));
+	req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+	QNetworkReply *reply = EventHub::get().network()->post(req, QByteArray("{}"));
+	QObject::connect(reply, &QNetworkReply::finished, reply, [reply, done] {
+		reply->deleteLater();
+		const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+		if (reply->error() != QNetworkReply::NoError || o.value("id").toString().isEmpty()) {
+			done(L("The ZunimiLabs relay could not be reached. Check your internet and try again."));
+			return;
+		}
+		Settings::get().set("relay/id", o.value("id").toString());
+		Settings::get().setSecret("relay/key", o.value("key").toString());
+		done({});
+	});
+}
+
+QString RelayEvents::kofiLink()
+{
+	const QString id = Settings::get().value("relay/id").toString();
+	return id.isEmpty() ? QString() : base() + "/v1/kofi/" + id;
+}
+
+void RelayEvents::kickLogin(std::function<void(const QString &)> done)
+{
+	ensureChannel([done](const QString &error) {
+		if (!error.isEmpty()) {
+			done(error);
+			return;
+		}
+		Settings &st = Settings::get();
+		QNetworkRequest req(QUrl(base() + "/v1/kick/start"));
+		req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+		const QJsonObject body{{"id", st.value("relay/id").toString()}, {"key", st.secret("relay/key")}};
+		QNetworkReply *reply = EventHub::get().network()->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+		QObject::connect(reply, &QNetworkReply::finished, reply, [reply, done] {
+			reply->deleteLater();
+			const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+			const QUrl url(o.value("url").toString());
+			if (reply->error() != QNetworkReply::NoError || !url.isValid() || url.host() != "id.kick.com") {
+				done(o.value("error").toString().isEmpty() ? L("The ZunimiLabs relay could not start the Kick login.")
+									  : o.value("error").toString());
+				return;
+			}
+			// listen right away, so the relay can say who logged in as soon as Kick sends them back
+			Settings::get().set("events/kickRelayPending", true);
+			EventHub::get().restart();
+			QDesktopServices::openUrl(url);
+			done({});
+		});
+	});
+}
+
+void RelayEvents::kickLogout()
+{
+	Settings &st = Settings::get();
+	if (hasChannel()) {
+		QNetworkRequest req(QUrl(base() + "/v1/kick/stop"));
+		req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+		const QJsonObject body{{"id", st.value("relay/id").toString()}, {"key", st.secret("relay/key")}};
+		QNetworkReply *reply = EventHub::get().network()->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+		QObject::connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+	}
+	st.set("events/kickRelayName", QString());
+	st.set("events/kickRelayPending", false);
+}
+
+bool RelayEvents::parse(const QJsonObject &m, StreamEvent *e)
+{
+	static const QStringList kinds = {"follow", "sub", "resub", "gift", "bits", "tip", "member"};
+	e->type = m.value("kind").toString();
+	if (!kinds.contains(e->type))
+		return false;
+	e->platform = m.value("platform").toString();
+	e->user = m.value("user").toString();
+	e->message = m.value("message").toString();
+	e->amount = m.value("amount").toDouble();
+	e->currency = m.value("currency").toString();
+	e->count = m.value("count").toInt();
+	e->tier = m.value("tier").toString();
+	return !e->user.isEmpty();
+}
+
 // ---- StreamElements (Astro socket)
 StreamElementsEvents::StreamElementsEvents(QObject *parent) : Connector("streamelements", parent)
 {
@@ -891,10 +1053,10 @@ StreamElementsEvents::StreamElementsEvents(QObject *parent) : Connector("streame
 		const QString type = msg.value("type").toString();
 		if (type == "response") {
 			if (msg.value("error").toString().isEmpty())
-				ok("StreamElements events on");
+				ok(L("StreamElements events on"));
 			else {
 				m_running = false;
-				hub().setStatus(m_key, "StreamElements refused the token: " + msg.value("data").toObject().value("message").toString(), false);
+				hub().setStatus(m_key, L("StreamElements refused the token: ") + msg.value("data").toObject().value("message").toString(), false);
 			}
 		} else if (type == "message") {
 			StreamEvent e;
@@ -907,11 +1069,11 @@ StreamElementsEvents::StreamElementsEvents(QObject *parent) : Connector("streame
 void StreamElementsEvents::start()
 {
 	if (Settings::get().secret("events/seJwt").isEmpty()) {
-		hub().setStatus(m_key, "Not set up", false);
+		hub().setStatus(m_key, L("Not set up"), false);
 		return;
 	}
 	m_running = true;
-	hub().setStatus(m_key, "Connecting...", false);
+	hub().setStatus(m_key, L("Connecting..."), false);
 	socket()->open(QUrl("wss://astro.streamelements.com"));
 }
 
@@ -970,7 +1132,7 @@ StreamlabsEvents::StreamlabsEvents(QObject *parent) : Connector("streamlabs", pa
 			const int interval = QJsonDocument::fromJson(text.mid(1).toUtf8()).object().value("pingInterval").toInt(25000);
 			m_ping->start(std::max(5000, interval));
 		} else if (text == "40") {
-			ok("Streamlabs events on");
+			ok(L("Streamlabs events on"));
 		} else if (text.startsWith("42")) {
 			const QJsonArray arr = QJsonDocument::fromJson(text.mid(2).toUtf8()).array();
 			if (arr.size() >= 2 && arr[0].toString() == "event")
@@ -978,7 +1140,7 @@ StreamlabsEvents::StreamlabsEvents(QObject *parent) : Connector("streamlabs", pa
 					hub().emitEvent(e);
 		} else if (text.startsWith("44")) {
 			m_running = false;
-			hub().setStatus(m_key, "Streamlabs refused the socket token.", false);
+			hub().setStatus(m_key, L("Streamlabs refused the socket token."), false);
 		}
 	});
 }
@@ -987,11 +1149,11 @@ void StreamlabsEvents::start()
 {
 	const QString token = Settings::get().secret("events/slToken");
 	if (token.isEmpty()) {
-		hub().setStatus(m_key, "Not set up", false);
+		hub().setStatus(m_key, L("Not set up"), false);
 		return;
 	}
 	m_running = true;
-	hub().setStatus(m_key, "Connecting...", false);
+	hub().setStatus(m_key, L("Connecting..."), false);
 	socket()->open(QUrl("wss://sockets.streamlabs.com/socket.io/?EIO=3&transport=websocket&token=" +
 			    QString::fromUtf8(QUrl::toPercentEncoding(token))));
 }

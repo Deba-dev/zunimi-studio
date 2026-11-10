@@ -56,6 +56,7 @@ public:
 signals:
 	void alarm(const QString &text);        // something to tell the streamer now (toast + tray)
 	void reportReady(const QString &html);  // after a stream ends
+	void marked(const QString &label, double recordingSeconds); // -1 when not recording
 
 private:
 	void tick();

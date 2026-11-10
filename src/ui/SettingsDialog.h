@@ -18,7 +18,7 @@ class QKeySequenceEdit;
 class SettingsDialog : public QDialog {
 	Q_OBJECT
 public:
-	enum Tab { Stream, Video, Recording, Audio, Connections, Automation, Hotkeys, Window, About };
+	enum Tab { Stream, Video, Recording, Audio, Connections, Automation, Remote, Hotkeys, Window, About };
 	SettingsDialog(ObsCore *core, WindowModes *modes, QWidget *parent);
 	void openTab(Tab tab);
 	std::function<void()> checkUpdates; // set by the main window
@@ -30,6 +30,8 @@ private:
 	QWidget *audioTab();
 	QWidget *connectionsTab();
 	QWidget *automationTab();
+	QWidget *remoteTab();
+	void showRemoteInfo();
 	QWidget *hotkeysTab();
 	QWidget *windowTab();
 	QWidget *aboutTab();
@@ -51,7 +53,8 @@ private:
 	QLineEdit *m_nameFormat;
 	QLineEdit *m_twitchChannel, *m_youtube, *m_kick, *m_kickRoom, *m_seJwt, *m_slToken, *m_twitchClient;
 	QComboBox *m_currency;
-	QLabel *m_twitchLogin;
+	QLabel *m_twitchLogin, *m_kickRelay;
+	QLineEdit *m_kofiLink, *m_kofiToken;
 	class QTableWidget *m_destinations, *m_rules;
 	QCheckBox *m_autoOn, *m_privacyOn, *m_privacyLive, *m_blackAlarm, *m_preflight, *m_report;
 	QSpinBox *m_micMinutes;
@@ -59,5 +62,10 @@ private:
 	QSpinBox *m_replaySeconds;
 	QList<QPair<QString, QKeySequenceEdit *>> m_keys;
 	QLabel *m_serverHint, *m_profileHint;
+	QComboBox *m_language, *m_accent;
+	QCheckBox *m_remoteOn, *m_remoteLan;
+	QSpinBox *m_remotePort;
+	QLineEdit *m_remotePw;
+	QLabel *m_remoteDeck, *m_remoteQr, *m_remoteLink;
 	bool m_filling = false;
 };

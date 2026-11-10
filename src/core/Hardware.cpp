@@ -1,4 +1,5 @@
 #include "core/Hardware.h"
+#include "core/I18n.h"
 
 #include <obs.h>
 
@@ -96,12 +97,12 @@ VideoPlan planFor(Profile profile, const Hardware &hw)
 QString encoderLabel(const QString &id)
 {
 	if (id.startsWith("obs_nvenc"))
-		return "NVIDIA NVENC";
+		return L("NVIDIA NVENC");
 	if (id.contains("_amf"))
-		return "AMD AMF";
+		return L("AMD AMF");
 	if (id.startsWith("obs_qsv11"))
-		return "Intel QuickSync";
-	return "x264 (CPU)";
+		return L("Intel QuickSync");
+	return L("x264 (CPU)");
 }
 
 namespace {
@@ -142,7 +143,7 @@ QString encoderFor(const QString &family, const QString &codec)
 QString codecLabel(const QString &codec)
 {
 	if (codec == "hevc")
-		return "HEVC (H.265)";
+		return L("HEVC (H.265)");
 	if (codec == "av1")
 		return "AV1";
 	return "H.264";
@@ -152,11 +153,11 @@ QString profileName(Profile profile)
 {
 	switch (profile) {
 	case Profile::Potato:
-		return "Potato";
+		return L("Potato");
 	case Profile::Ultra:
-		return "Ultra";
+		return L("Ultra");
 	default:
-		return "Balanced";
+		return L("Balanced");
 	}
 }
 

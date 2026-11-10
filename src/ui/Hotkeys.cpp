@@ -1,4 +1,5 @@
 #include "ui/Hotkeys.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 
@@ -54,23 +55,23 @@ UINT virtualKey(int key, bool keypad)
 QVector<Hotkeys::Action> Hotkeys::actions()
 {
 	QVector<Action> list = {
-		{"live", "Go Live / End stream"},
-		{"record", "Start / stop recording"},
-		{"replay_save", "Save replay"},
-		{"replay_toggle", "Replay buffer on / off"},
-		{"mic_mute", "Mute / unmute mic"},
-		{"desktop_mute", "Mute / unmute desktop audio"},
-		{"ptt", "Push to talk (mic on while held)"},
-		{"ptm", "Push to mute (mic off while held)"},
-		{"record_pause", "Pause / resume recording"},
-		{"screenshot", "Screenshot"},
-		{"studio_go", "Studio mode: send preview live"},
-		{"vcam", "Virtual camera on / off"},
-		{"undo", "Undo last change"},
-		{"mark", "Mark moment (chapter + saved replay)"},
+		{"live", L("Go Live / End stream")},
+		{"record", L("Start / stop recording")},
+		{"replay_save", L("Save replay")},
+		{"replay_toggle", L("Replay buffer on / off")},
+		{"mic_mute", L("Mute / unmute mic")},
+		{"desktop_mute", L("Mute / unmute desktop audio")},
+		{"ptt", L("Push to talk (mic on while held)")},
+		{"ptm", L("Push to mute (mic off while held)")},
+		{"record_pause", L("Pause / resume recording")},
+		{"screenshot", L("Screenshot")},
+		{"studio_go", L("Studio mode: send preview live")},
+		{"vcam", L("Virtual camera on / off")},
+		{"undo", L("Undo last change")},
+		{"mark", L("Mark moment (chapter + saved replay)")},
 	};
 	for (int i = 1; i <= 9; i++)
-		list.append({QString("scene_%1").arg(i), QString("Switch to scene %1").arg(i)});
+		list.append({QString("scene_%1").arg(i), QString(L("Switch to scene %1")).arg(i)});
 	return list;
 }
 

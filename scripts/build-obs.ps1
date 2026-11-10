@@ -54,4 +54,6 @@ try {
     if ($LASTEXITCODE) { throw "OBS build failed" }
     cmake --install build_zunimi --config RelWithDebInfo --prefix "$Root\obs-install"
 } finally { Pop-Location }
+# OBS's signed game-capture hook for this version (see get-signed-hook.ps1); build.ps1 fetches it too if it is missing.
+& (Join-Path $PSScriptRoot "get-signed-hook.ps1") -Version $ObsTag -Root $Root | Out-Null
 Write-Host "libobs is ready. Now run scripts\build.ps1"

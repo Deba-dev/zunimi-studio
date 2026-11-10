@@ -1,6 +1,7 @@
 // Encoders and outputs: stream (RTMP/RTMPS, SRT, RIST, WHIP), recording, replay buffer, virtual camera,
 // screenshots, live health and self-healing.
 #include "core/ObsCore.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 
@@ -31,28 +32,28 @@ QString stopReason(int code, const char *detail)
 	QString why;
 	switch (code) {
 	case OBS_OUTPUT_BAD_PATH:
-		why = "The server address is wrong. Check it in Settings > Stream.";
+		why = L("The server address is wrong. Check it in Settings > Stream.");
 		break;
 	case OBS_OUTPUT_CONNECT_FAILED:
-		why = "Could not reach the streaming server. Check your internet, or the server address.";
+		why = L("Could not reach the streaming server. Check your internet, or the server address.");
 		break;
 	case OBS_OUTPUT_INVALID_STREAM:
-		why = "The platform refused the stream key. Copy a fresh key from your dashboard.";
+		why = L("The platform refused the stream key. Copy a fresh key from your dashboard.");
 		break;
 	case OBS_OUTPUT_DISCONNECTED:
-		why = "Your internet dropped and the stream could not reconnect.";
+		why = L("Your internet dropped and the stream could not reconnect.");
 		break;
 	case OBS_OUTPUT_NO_SPACE:
-		why = "The disk is full, so recording stopped. Free some space or pick another folder.";
+		why = L("The disk is full, so recording stopped. Free some space or pick another folder.");
 		break;
 	case OBS_OUTPUT_ENCODE_ERROR:
-		why = "The video encoder stopped working. Try the x264 (CPU) encoder in Settings > Video.";
+		why = L("The video encoder stopped working. Try the x264 (CPU) encoder in Settings > Video.");
 		break;
 	case OBS_OUTPUT_UNSUPPORTED:
-		why = "This encoder or format is not supported here. HEVC and AV1 need a platform that accepts them.";
+		why = L("This encoder or format is not supported here. HEVC and AV1 need a platform that accepts them.");
 		break;
 	default:
-		why = "Something went wrong.";
+		why = L("Something went wrong.");
 	}
 	if (detail && *detail)
 		why += QString(" (%1)").arg(QString::fromUtf8(detail));
@@ -179,7 +180,7 @@ bool ObsCore::ensureEncoders(QString *error)
 		m_video = obs_video_encoder_create(id.toUtf8().constData(), "Zunimi video", s, nullptr);
 		obs_data_release(s);
 		if (!m_video) {
-			*error = "The " + encoderLabel(id) + " encoder is not available on this PC.";
+			*error = L("The ") + encoderLabel(id) + L(" encoder is not available on this PC.");
 			return false;
 		}
 		obs_encoder_set_video(m_video, obs_get_video());
@@ -195,7 +196,7 @@ bool ObsCore::ensureEncoders(QString *error)
 						      s, size_t(i), nullptr);
 		obs_data_release(s);
 		if (!m_audio[i]) {
-			*error = "The audio encoder is missing.";
+			*error = L("The audio encoder is missing.");
 			return false;
 		}
 		obs_encoder_set_audio(m_audio[i], obs_get_audio());
@@ -221,7 +222,7 @@ bool ObsCore::ensureRecordEncoders(QString *error)
 	m_recVideo = obs_video_encoder_create(id.toUtf8().constData(), "Zunimi recording video", s, nullptr);
 	obs_data_release(s);
 	if (!m_recVideo) {
-		*error = "The " + encoderLabel(id) + " encoder could not make a second encode for recordings.";
+		*error = L("The ") + encoderLabel(id) + L(" encoder could not make a second encode for recordings.");
 		return false;
 	}
 	obs_encoder_set_video(m_recVideo, obs_get_video());
@@ -280,13 +281,13 @@ bool ObsCore::startWithFallback(obs_output_t *output, QString *error, bool recor
 		if (applyPlan(plan, &ignored) && (record ? ensureRecordEncoders(&ignored) : ensureEncoders(&ignored))) {
 			attachEncoders(output, record);
 			if (obs_output_start(output)) {
-				emit notice(failed + " did not start, so Zunimi switched to x264 (CPU).");
+				emit notice(failed + L(" did not start, so Zunimi switched to x264 (CPU)."));
 				return true;
 			}
 		}
 	}
 	const char *detail = obs_output_get_last_error(output);
-	*error = detail && *detail ? QString::fromUtf8(detail) : "The output could not start.";
+	*error = detail && *detail ? QString::fromUtf8(detail) : L("The output could not start.");
 	return false;
 }
 
@@ -297,7 +298,7 @@ bool ObsCore::startStream(const QString &server, const QString &key, QString *er
 	Settings &st = Settings::get();
 	const bool whip = st.value("stream/platform").toString() == "whip";
 	if (server.trimmed().isEmpty() || (!whip && key.trimmed().isEmpty())) {
-		*error = "Add your stream key first (Settings > Stream).";
+		*error = L("Add your stream key first (Settings > Stream).");
 		return false;
 	}
 	if (!ensureEncoders(error))
@@ -309,7 +310,7 @@ bool ObsCore::startStream(const QString &server, const QString &key, QString *er
 			       : url.startsWith("srt://") || url.startsWith("rist://") ? "ffmpeg_mpegts_muxer"
 										 : "rtmp_output";
 	if (whip && !moduleLoaded("obs-webrtc")) {
-		*error = "WHIP (WebRTC) is not available in this build.";
+		*error = L("WHIP (WebRTC) is not available in this build.");
 		return false;
 	}
 	if (whip && !m_opus) {
@@ -318,7 +319,7 @@ bool ObsCore::startStream(const QString &server, const QString &key, QString *er
 		m_opus = obs_audio_encoder_create("ffmpeg_opus", "Zunimi opus", s, 0, nullptr);
 		obs_data_release(s);
 		if (!m_opus) {
-			*error = "The Opus audio encoder WHIP needs is missing.";
+			*error = L("The Opus audio encoder WHIP needs is missing.");
 			return false;
 		}
 		obs_encoder_set_audio(m_opus, obs_get_audio());
@@ -342,7 +343,7 @@ bool ObsCore::startStream(const QString &server, const QString &key, QString *er
 	if (!m_stream) {
 		m_stream = obs_output_create(outputId, "Zunimi stream", nullptr, nullptr);
 		if (!m_stream) {
-			*error = "This kind of server address is not supported.";
+			*error = L("This kind of server address is not supported.");
 			return false;
 		}
 		obs_output_set_reconnect_settings(m_stream, 20, 3);
@@ -412,7 +413,7 @@ void ObsCore::startExtras()
 		e.output = obs_output_create(ts ? "ffmpeg_mpegts_muxer" : "rtmp_output", ("Zunimi extra " + e.name).toUtf8().constData(),
 					     nullptr, nullptr);
 		if (!e.service || !e.output) {
-			e.error = "not supported";
+			e.error = L("not supported");
 		} else {
 			obs_output_set_reconnect_settings(e.output, 20, 3);
 			obs_output_set_service(e.output, e.service);
@@ -420,8 +421,8 @@ void ObsCore::startExtras()
 			obs_output_set_audio_encoder(e.output, m_audio[track], 0);
 			if (!obs_output_start(e.output)) {
 				const char *why = obs_output_get_last_error(e.output);
-				e.error = why && *why ? QString::fromUtf8(why) : "could not connect";
-				emit problem(QString("Multistream to %1 didn't start: %2").arg(e.name, e.error));
+				e.error = why && *why ? QString::fromUtf8(why) : L("could not connect");
+				emit problem(QString(L("Multistream to %1 didn't start: %2")).arg(e.name, e.error));
 			}
 		}
 		m_extras << e;
@@ -455,7 +456,7 @@ bool ObsCore::startRecording(const QString &folder, QString *error)
 	if (recording())
 		return true;
 	if (!QDir().mkpath(folder)) {
-		*error = "The recording folder cannot be used. Pick another one in Settings > Recording.";
+		*error = L("The recording folder cannot be used. Pick another one in Settings > Recording.");
 		return false;
 	}
 	if (!ensureRecordEncoders(error))
@@ -519,7 +520,7 @@ bool ObsCore::startReplay(const QString &folder, int seconds, QString *error)
 	if (replaying())
 		return true;
 	if (!QDir().mkpath(folder)) {
-		*error = "The replay folder cannot be used. Pick another one in Settings > Recording.";
+		*error = L("The replay folder cannot be used. Pick another one in Settings > Recording.");
 		return false;
 	}
 	if (!ensureRecordEncoders(error))
@@ -538,7 +539,7 @@ bool ObsCore::startReplay(const QString &folder, int seconds, QString *error)
 		m_replay = obs_output_create("replay_buffer", "Zunimi replay", s, nullptr);
 		if (!m_replay) {
 			obs_data_release(s);
-			*error = "The replay buffer is not available.";
+			*error = L("The replay buffer is not available.");
 			return false;
 		}
 		signal_handler_t *sh = obs_output_get_signal_handler(m_replay);
@@ -641,7 +642,7 @@ bool ObsCore::installVirtualCam(QString *error)
 			args += QString("regsvr32.exe /i /s \"%1\" & ").arg(dll);
 	}
 	if (args.isEmpty()) {
-		*error = "The virtual camera files are missing. Reinstalling Zunimi Studio should fix it.";
+		*error = L("The virtual camera files are missing. Reinstalling Zunimi Studio should fix it.");
 		return false;
 	}
 	args = "/c " + args + "exit";
@@ -652,7 +653,7 @@ bool ObsCore::installVirtualCam(QString *error)
 	info.lpParameters = reinterpret_cast<const wchar_t *>(args.utf16());
 	info.nShow = SW_HIDE;
 	if (!ShellExecuteExW(&info)) {
-		*error = "Windows did not allow it. Click Yes when Windows asks, to install the virtual camera.";
+		*error = L("Windows did not allow it. Click Yes when Windows asks, to install the virtual camera.");
 		return false;
 	}
 	if (info.hProcess) {
@@ -660,7 +661,7 @@ bool ObsCore::installVirtualCam(QString *error)
 		CloseHandle(info.hProcess);
 	}
 	if (!virtualCamInstalled()) {
-		*error = "The virtual camera could not be installed.";
+		*error = L("The virtual camera could not be installed.");
 		return false;
 	}
 	return true;
@@ -675,14 +676,14 @@ bool ObsCore::startVirtualCam(QString *error)
 	if (!m_vcam) {
 		m_vcam = obs_output_create("virtualcam_output", "Zunimi virtual camera", nullptr, nullptr);
 		if (!m_vcam) {
-			*error = "The virtual camera is not available in this build.";
+			*error = L("The virtual camera is not available in this build.");
 			return false;
 		}
 		signal_handler_connect(obs_output_get_signal_handler(m_vcam), "stop", onVirtualCamStop, this);
 	}
 	if (!obs_output_start(m_vcam)) {
 		const char *detail = obs_output_get_last_error(m_vcam);
-		*error = detail && *detail ? QString::fromUtf8(detail) : "The virtual camera could not start.";
+		*error = detail && *detail ? QString::fromUtf8(detail) : L("The virtual camera could not start.");
 		return false;
 	}
 	emit virtualCamChanged(true);
@@ -758,7 +759,7 @@ void takeShot(void *param)
 			if (!image.isNull() && image.save(path, "PNG"))
 				emit core->screenshotSaved(path);
 			else
-				emit core->problem("The screenshot could not be saved.");
+				emit core->problem(L("The screenshot could not be saved."));
 		},
 		Qt::QueuedConnection);
 }
@@ -773,7 +774,7 @@ void ObsCore::screenshot(const QString &folder, obs_source_t *source)
 	if (!shot->cx || !shot->cy) {
 		obs_source_release(shot->source);
 		delete shot;
-		emit problem("That source has no picture yet.");
+		emit problem(L("That source has no picture yet."));
 		return;
 	}
 	static int taken = 0; // two in the same moment (a scene and a source) must not share a name
@@ -822,14 +823,14 @@ void ObsCore::onReconnect(void *data, calldata_t *)
 {
 	auto *self = static_cast<ObsCore *>(data);
 	QMetaObject::invokeMethod(
-		self, [self] { emit self->notice("Internet hiccup. Reconnecting the stream..."); },
+		self, [self] { emit self->notice(L("Internet hiccup. Reconnecting the stream...")); },
 		Qt::QueuedConnection);
 }
 
 void ObsCore::onReconnected(void *data, calldata_t *)
 {
 	auto *self = static_cast<ObsCore *>(data);
-	QMetaObject::invokeMethod(self, [self] { emit self->notice("Back live."); }, Qt::QueuedConnection);
+	QMetaObject::invokeMethod(self, [self] { emit self->notice(L("Back live.")); }, Qt::QueuedConnection);
 }
 
 void ObsCore::onRecordStart(void *data, calldata_t *)
@@ -933,14 +934,14 @@ void ObsCore::heal(Health &h)
 	if (m_badSeconds >= 4 && m_bitrateNow > floor) {
 		setBitrate(std::max(floor, m_bitrateNow * 75 / 100));
 		m_badSeconds = 0;
-		emit notice(QString("Your internet is struggling, so Zunimi lowered the bitrate to %1 kbps to keep you "
-				    "live. It goes back up when things settle.")
+		emit notice(QString(L("Your internet is struggling, so Zunimi lowered the bitrate to %1 kbps to keep you "
+				    "live. It goes back up when things settle."))
 				    .arg(m_bitrateNow));
 	} else if (m_goodSeconds >= 60 && m_bitrateNow < m_plan.bitrate) {
 		setBitrate(std::min(m_plan.bitrate, m_bitrateNow * 115 / 100));
 		m_goodSeconds = 0;
 		if (m_bitrateNow == m_plan.bitrate)
-			emit notice(QString("Internet is steady again: bitrate back to %1 kbps.").arg(m_bitrateNow));
+			emit notice(QString(L("Internet is steady again: bitrate back to %1 kbps.")).arg(m_bitrateNow));
 	}
 	h.bitrate = m_bitrateNow;
 }
@@ -977,7 +978,7 @@ Health ObsCore::health()
 
 	heal(h);
 	// The worst problem wins, explained in words a beginner understands.
-	h.text = busy() ? "All smooth" : "Ready";
+	h.text = busy() ? L("All smooth") : L("Ready");
 	auto flag = [&h](double value, const QString &warn, const QString &bad) {
 		const int level = value >= 5.0 ? 2 : value >= 1.0 ? 1 : 0;
 		if (level > h.level) {
@@ -985,13 +986,13 @@ Health ObsCore::health()
 			h.text = level == 2 ? bad : warn;
 		}
 	};
-	flag(h.renderLag, "Your graphics card is busy. Capping your game's FPS gives the stream room.",
-	     "Your graphics card is overloaded. Cap your game's FPS or use the Potato profile.");
-	flag(h.encodeLag, "The encoder is struggling. A lighter profile would help.",
-	     "Your PC can't encode fast enough. Switch to Potato or a hardware encoder in Settings.");
-	flag(h.dropped, "Your internet dropped a few frames.",
-	     "Your internet is dropping frames. Lower the bitrate in Settings > Video.");
+	flag(h.renderLag, L("Your graphics card is busy. Capping your game's FPS gives the stream room."),
+	     L("Your graphics card is overloaded. Cap your game's FPS or use the Potato profile."));
+	flag(h.encodeLag, L("The encoder is struggling. A lighter profile would help."),
+	     L("Your PC can't encode fast enough. Switch to Potato or a hardware encoder in Settings."));
+	flag(h.dropped, L("Your internet dropped a few frames."),
+	     L("Your internet is dropping frames. Lower the bitrate in Settings > Video."));
 	if (h.level == 0 && streaming() && h.bitrate < m_plan.bitrate)
-		h.text = QString("Live at a safer %1 kbps while your internet recovers").arg(h.bitrate);
+		h.text = QString(L("Live at a safer %1 kbps while your internet recovers")).arg(h.bitrate);
 	return h;
 }

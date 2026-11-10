@@ -1,64 +1,30 @@
-## Zunimi Studio 0.3.0 (preview)
+## Zunimi Studio 0.4.0 (preview)
 
-The big one: everything OBS does for editing and recording, plus alerts, chat and widgets built in (no browser needed), a vertical canvas, multistream, and a helper that watches your stream for you.
+Hindi, a remote for your phone and Stream Deck, ready-made scenes, a first-time setup, game capture that anti-cheat games accept, and a new look.
 
-**Install:** download **ZunimiStudio-Setup.exe** below and run it. Already on 0.2? The app offers this update by itself. If Windows SmartScreen warns you, click **More info > Run anyway** (the installer isn't code-signed yet).
+**Install:** download **ZunimiStudio-Setup.exe** below and run it. Already on 0.3? The app offers this update by itself. If Windows SmartScreen warns you, click **More info > Run anyway** (the installer isn't code-signed yet).
 
-### Editing
-- **Undo and redo** (Ctrl+Z, Ctrl+Y) for moving, resizing, cropping, adding, removing, renaming and scene changes. Removing a scene can be undone too.
-- **Crop:** hold Alt and drag a corner. **Rotate and flip** from the right-click menu (Ctrl+R turns 90°).
-- **Edit size and place:** exact position, size, rotation, crop and fill mode, with live preview.
-- **Copy size and place** from one source to another (Ctrl+C, Ctrl+V).
-- **Blend modes** (screen, multiply, add...), **scaling** (sharp pixels, Lanczos, area), and a **show/hide effect** per source.
-- **A scene inside another scene.** Play, pause and restart video and sound files from the right-click menu.
+### Hindi
+- **Settings > Window > Language: हिन्दी.** Every screen, message and button, and OBS's own options for sources and filters. Zunimi restarts once to switch.
+- Scene templates put their titles on stream in Hindi too.
 
-### Scenes
-- **Studio mode:** edit a scene on the left while the right shows what's on air, then press **Go**.
-- **Scene collections** (whole sets of scenes) and **profiles** (stream key, quality and recording settings), from **Menu**.
-- **Import from OBS Studio**, or an overlay pack's scene collection (.json). File paths that pointed at someone else's PC are found again.
-- **Stinger transitions** (your own video), luma wipe, and a different transition per scene.
-- **Projectors:** what's on air (or one scene or source) fullscreen on another screen, or in a window.
+### Remote control
+- **Stream Deck, Touch Portal, Streamer.bot, Loupedeck:** Zunimi speaks the same remote language as OBS (obs-websocket 5), so their OBS actions work as they are. Settings > Remote, then connect them to 127.0.0.1, port 4455 and the password shown.
+- **Your phone as a remote:** turn on "Allow phones and PCs on my Wi-Fi" and scan the QR code. Go live, record, replay, mark moments, mute, switch scenes, in English or Hindi.
+- A password is always needed; after five wrong tries a device has to wait.
 
-### Sound
-- **Listen in headphones** per source (also "only I hear it"), **sync offset**, **balance**, and **recording tracks** 1-6 (the **⋯** button in the mixer).
-- **Push to talk** and **push to mute** hotkeys.
+### Easier start
+- **First-time setup:** where you stream and your key, what viewers see (game, screen, webcam, alerts, chat), and your OBS scenes if you have them.
+- **Simple mode** shows just what you need to go live and record; **Pro mode** shows every tool. Switch from Menu.
+- **Scene templates:** Starting soon (with a countdown), Be right back, Stream ending, Gaming and Just chatting, in Neon, Clean and Sunset styles. Scenes list > **+** > From a template. More packs will appear there from zunimilabs.online.
 
-### Recording and output
-- **Formats:** crash-safe MP4 and MOV, MKV, classic MP4/MOV, FLV, MPEG-TS. **Pause** without ending the file. **A new file every N minutes or MB.** File names from a template ({scene}, date and time).
-- **Separate sound tracks** in recordings (game, mic, Discord apart for editing).
-- **Recording quality of its own** (high, near lossless, smaller) with HEVC or AV1 when your graphics card can.
-- **HEVC and AV1 streaming**, rate control, speed vs quality, keyframe interval.
-- **SRT, RIST and WHIP (WebRTC)** besides RTMP. **Stream delay.** **Record automatically while live.**
-- **Virtual camera:** what's on air as a webcam in Discord, Zoom or Meet.
-- **Screenshots** of what's on air, a scene or a source.
-- **Multistream:** the same stream to several platforms at once (costs upload, not CPU).
+### Game capture with anti-cheat
+- Game capture now uses OBS Studio's own capture hook, signed by the OBS Project, so Valorant (Vanguard) and other anti-cheat games accept it like they accept OBS.
 
-### Alerts, chat and widgets (no browser source needed)
-- **Alert box** with a **notification builder:** title with {name}/{amount}, picture or GIF, sound, animation, layout, fonts, colours, a minimum amount, bigger-amount versions, and **text to speech** (Windows voices, Hindi included when installed). Four looks to start from; designs can be exported and shared.
-- **Chat box** and a **chat panel** with Twitch, YouTube and Kick together. Typing into Twitch chat once you log in.
-- **Goal bar, labels** (latest follower, top tipper...), **timers** (countdown, subathon, clock, time live) and a **recent events** list.
-- **Connections:** Twitch (chat, subs, gift subs, bits and raids with just your name; follows with a login), YouTube (chat, Super Chats, memberships, no login), Kick (chat, subs, gifts), StreamElements and Streamlabs (tips through UPI, cards and PayPal, plus their events).
-- **Browser source** for StreamElements and Streamlabs overlay links and any web page. It comes with the installer but only starts once you use it, so it costs no memory until then.
+### Alerts
+- **Kick follows and Kicks, and Ko-fi tips and memberships** (Settings > Connections), through the ZunimiLabs relay. These switch on as soon as the relay is live; you'll see it in the app.
 
-### Zunimi extras
-- **Vertical canvas** (9:16 for Shorts, Reels, TikTok): it follows the scene on air, can have its own webcam and widgets, and records or streams beside the landscape one.
-- **Pre-flight check** before Go Live: empty scene, muted mic, low disk space, CPU encoding when your GPU could.
-- **Stream Doctor:** when the health bar shows a problem, a **Fix it** button does the fix.
-- **Alarms** while live: the mic has been silent for minutes, or the stream went black.
-- **After-stream report:** bitrate, drops, the roughest minute, and what to change.
-- **Automatic scene switching** by the app in front (for example Valorant > "Gaming").
-- **Privacy guard:** screen captures hide while a password manager, banking or stream-key window is in front.
-- **Mark moment** hotkey: a chapter in the recording ("chapters.txt" for YouTube) and a saved replay. A moments log for Clip Studio.
-- **Battery warning** for laptops.
-- **Crash reports:** a crash writes where it happened to the log.
-
-### Changed
-- **Esc asks before hiding** the app to the tray (Cancel is the default), and quitting asks too. "Don't ask again" is in the question and in Settings > Window.
-
-### Still in this preview
-- **Game capture and anti-cheat (Valorant/Vanguard and others):** the capture hook is unsigned and may be blocked. Use a **Screen** source for those games until the signed hook ships.
-- **Twitch follow alerts and typing in Twitch chat** need Zunimi's Twitch app id, which isn't set in this build yet (Settings > Connections > Advanced takes your own).
-- **YouTube chat** is read from YouTube's own live chat page, which YouTube can change at any time.
-
-### Source
-Zunimi Studio is free software under the GPL-2.0-or-later. It uses libobs from [OBS Studio 33.0.1](https://github.com/obsproject/obs-studio/tree/33.0.1), built with `scripts/build-obs.ps1` in this repo.
+### Also new
+- **Groups:** select several sources (Ctrl-click), right-click > Group. They move, hide and lock together.
+- **Clip Studio bridge:** in Clip Studio, set the OBS address to Zunimi (127.0.0.1, port and password from Settings > Remote). Every recording becomes a stream to clip, and every **Mark moment** becomes a clip.
+- **A new look,** the same as zunimilabs.online: blue-black, with a Violet, Sunset, Ocean or Mint accent (Settings > Window).

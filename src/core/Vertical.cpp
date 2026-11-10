@@ -1,6 +1,7 @@
 // The vertical canvas: a second 9:16 picture (Shorts, Reels, TikTok) made from the same sources, with its own
 // stream and recording. Built on libobs canvases, so it is a real second mix, not a crop of the encoded video.
 #include "core/ObsCore.h"
+#include "core/I18n.h"
 
 #include "core/Settings.h"
 
@@ -32,7 +33,7 @@ bool ObsCore::createVerticalCanvas(QString *error)
 	m_vcanvas = obs_canvas_create("Vertical", &ovi, PROGRAM);
 	if (!m_vcanvas) {
 		if (error)
-			*error = "This PC could not make a second canvas.";
+			*error = L("This PC could not make a second canvas.");
 		return false;
 	}
 	return true;
@@ -131,7 +132,7 @@ void ObsCore::loadVertical(obs_data_t *root)
 		return;
 	}
 	// Rebuild it on the vertical canvas (a scene born there, not moved, so shutdown stays clean), item by item.
-	obs_source_set_name(scene, (QString(VSCENE) + " (loading)").toUtf8().constData());
+	obs_source_set_name(scene, (QString(VSCENE) + L(" (loading)")).toUtf8().constData());
 	obs_scene_t *fresh = obs_canvas_scene_create(m_vcanvas, VSCENE);
 	m_vscene = obs_scene_get_source(fresh);
 	obs_data_t *priv = obs_source_get_private_settings(m_vscene);
@@ -256,7 +257,7 @@ bool ObsCore::ensureVerticalEncoder(QString *error)
 	m_vvideo = obs_video_encoder_create(id.toUtf8().constData(), "Zunimi vertical video", s, nullptr);
 	obs_data_release(s);
 	if (!m_vvideo) {
-		*error = "A second encoder for the vertical canvas isn't available on this PC.";
+		*error = L("A second encoder for the vertical canvas isn't available on this PC.");
 		return false;
 	}
 	obs_encoder_set_video(m_vvideo, obs_canvas_get_video(m_vcanvas));
@@ -272,7 +273,7 @@ void ObsCore::startVerticalOutputs(bool stream, bool record, const QString &fold
 	const int track = std::clamp(st.value("stream/track", 1).toInt(), 1, 6) - 1;
 	if (stream && st.value("vertical/stream", false).toBool() && !st.value("vertical/server").toString().isEmpty()) {
 		if (!ensureVerticalEncoder(&error)) {
-			emit problem("Vertical stream: " + error);
+			emit problem(L("Vertical stream: ") + error);
 		} else {
 			obs_data_t *s = obs_data_create();
 			obs_data_set_string(s, "server", st.value("vertical/server").toString().toUtf8().constData());
@@ -290,12 +291,12 @@ void ObsCore::startVerticalOutputs(bool stream, bool record, const QString &fold
 			obs_output_set_video_encoder(m_vstream, m_vvideo);
 			obs_output_set_audio_encoder(m_vstream, m_audio[track], 0);
 			if (!obs_output_start(m_vstream))
-				emit problem("The vertical stream didn't start: " + QString::fromUtf8(obs_output_get_last_error(m_vstream)));
+				emit problem(L("The vertical stream didn't start: ") + QString::fromUtf8(obs_output_get_last_error(m_vstream)));
 		}
 	}
 	if (record && st.value("vertical/record", true).toBool()) {
 		if (!ensureVerticalEncoder(&error)) {
-			emit problem("Vertical recording: " + error);
+			emit problem(L("Vertical recording: ") + error);
 			return;
 		}
 		const QString path = QDir(folder).filePath(QFileInfo(m_recordPath).completeBaseName() + " (vertical).mp4");
@@ -309,7 +310,7 @@ void ObsCore::startVerticalOutputs(bool stream, bool record, const QString &fold
 		obs_output_set_video_encoder(m_vrecord, m_vvideo);
 		obs_output_set_audio_encoder(m_vrecord, m_audio[track], 0);
 		if (!obs_output_start(m_vrecord))
-			emit problem("The vertical recording didn't start.");
+			emit problem(L("The vertical recording didn't start."));
 	}
 }
 

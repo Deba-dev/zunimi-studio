@@ -1,10 +1,12 @@
 #include "ui/MainWindow.h"
+#include "core/I18n.h"
 
 #include "core/Addons.h"
 #include "core/Assist.h"
 #include "core/ObsCore.h"
 #include "core/Settings.h"
 #include "events/Events.h"
+#include "net/Remote.h"
 #include "overlays/Overlays.h"
 #include "ui/AlertDesigner.h"
 #include "ui/Dialogs.h"
@@ -15,6 +17,8 @@
 #include "ui/PreviewWidget.h"
 #include "ui/PropertiesView.h"
 #include "ui/SettingsDialog.h"
+#include "ui/SetupWizard.h"
+#include "ui/Templates.h"
 #include "ui/Theme.h"
 #include "ui/WindowModes.h"
 #include "version.h"
@@ -112,7 +116,7 @@ void restyle(QWidget *w)
 
 QString defaultFolder()
 {
-	return QStandardPaths::writableLocation(QStandardPaths::MoviesLocation) + "/Zunimi Studio";
+	return QStandardPaths::writableLocation(QStandardPaths::MoviesLocation) + L("/Zunimi Studio");
 }
 
 // "KA222Q H: 1920x1080 @ 0,0 (Primary Monitor)" -> "Screen 1: KA222Q H (main)"; a screen with no name is
@@ -121,13 +125,13 @@ QString screenLabel(int number, const QString &raw)
 {
 	QString name = raw.section(':', 0, 0).trimmed();
 	if (name.isEmpty())
-		name = "Built-in display";
+		name = L("Built-in display");
 	const auto size = QRegularExpression("(\\d+)x(\\d+)").match(raw);
-	QString label = QString("Screen %1: %2").arg(number).arg(name);
+	QString label = QString(L("Screen %1: %2")).arg(number).arg(name);
 	if (size.hasMatch())
 		label += QString("  %1×%2").arg(size.captured(1), size.captured(2));
 	if (raw.contains("Primary"))
-		label += "  (main)";
+		label += L("  (main)");
 	return label;
 }
 
@@ -170,9 +174,9 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	connect(events, &EventsPanel::setupRequested, this, [this] { openSettings(SettingsDialog::Connections); });
 	auto *side = new QTabWidget;
 	side->setObjectName("side");
-	side->addTab(m_mixer, "Audio");
-	side->addTab(chat, "Chat");
-	side->addTab(events, "Events");
+	side->addTab(m_mixer, L("Audio"));
+	side->addTab(chat, L("Chat"));
+	side->addTab(events, L("Events"));
 	side->setCurrentIndex(Settings::get().value("window/sideTab", 0).toInt());
 	connect(side, &QTabWidget::currentChanged, this, [](int i) { Settings::get().set("window/sideTab", i); });
 	auto *mixerLayout = new QVBoxLayout;
@@ -203,7 +207,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 		st.set("events/liveSince", on ? QDateTime::currentMSecsSinceEpoch() : 0);
 		if (on) {
 			m_liveSince.start();
-			say("You're live!");
+			say(L("You're live!"));
 			if (st.value("stream/autoRecord", false).toBool() && !m_core->recording()) {
 				toggleRecord();
 				setProperty("autoRecording", true);
@@ -218,22 +222,28 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	});
 	connect(m_core, &ObsCore::recordingChanged, this, [this](bool on, const QString &file) {
 		if (!on && QFileInfo::exists(file))
-			say("Recording saved: " + QFileInfo(file).fileName());
+			say(L("Recording saved: ") + QFileInfo(file).fileName());
 		updateButtons();
 		updatePreview();
 	});
 	connect(m_core, &ObsCore::replayChanged, this, [this](bool on) {
 		if (on)
-			say(QString("Replay buffer on: Save replay keeps the last %1 seconds.")
+			say(QString(L("Replay buffer on: Save replay keeps the last %1 seconds."))
 				    .arg(Settings::get().value("replay/seconds", 30).toInt()));
 		updateButtons();
 	});
 	connect(m_core, &ObsCore::replaySaved, this, [this](const QString &file) {
-		say("Replay saved: " + QFileInfo(file).fileName());
+		say(L("Replay saved: ") + QFileInfo(file).fileName());
 	});
 	connect(m_core, &ObsCore::problem, this, [this](const QString &text) { say(text, true); });
 	connect(m_core, &ObsCore::notice, this, [this](const QString &text) { say(text); });
 	connect(m_core, &ObsCore::sceneChanged, this, &MainWindow::refreshSources);
+	m_remote = new Remote(m_core, this);
+	m_remote->action = [this](const QString &action) { hotkey(action); };
+	connect(m_remote, &Remote::audioChanged, this, [this] { m_mixer->refresh(true); });
+	connect(qApp, &QCoreApplication::aboutToQuit, m_remote, [this] { m_remote->stop(true); });
+	applyRemote();
+	connect(m_assist, &Assist::marked, m_remote, &Remote::announceMark); // Clip Studio clips these
 	connect(m_core, &ObsCore::scenesChanged, this, &MainWindow::refreshScenes);
 	connect(m_modes, &WindowModes::visibilityChanged, this, [this](bool) { updatePreview(); });
 	connect(m_mixer, &Mixer::filtersRequested, this, &MainWindow::openFilters);
@@ -248,7 +258,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 			return;
 		auto *dialog = new QDialog(this);
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
-		dialog->setWindowTitle("How your stream went");
+		dialog->setWindowTitle(L("How your stream went"));
 		auto *view = new QTextBrowser;
 		view->setHtml(html);
 		view->setStyleSheet("QTextBrowser { background: transparent; border: none; }");
@@ -261,22 +271,22 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 		dialog->show();
 	});
 	connect(m_core, &ObsCore::recordingPausedChanged, this, [this](bool paused) {
-		say(paused ? "Recording paused. Nothing is written until you resume." : "Recording resumed.");
+		say(paused ? L("Recording paused. Nothing is written until you resume.") : L("Recording resumed."));
 		updateButtons();
 	});
 	connect(m_core, &ObsCore::virtualCamChanged, this, [this](bool on) {
 		if (on)
-			say("Virtual camera on: pick \"OBS Virtual Camera\" as the camera in Discord, Zoom, Meet or any app.");
+			say(L("Virtual camera on: pick \"OBS Virtual Camera\" as the camera in Discord, Zoom, Meet or any app."));
 		updateButtons();
 	});
 	connect(m_core, &ObsCore::screenshotSaved, this,
-		[this](const QString &file) { say("Screenshot saved: " + QFileInfo(file).fileName()); });
+		[this](const QString &file) { say(L("Screenshot saved: ") + QFileInfo(file).fileName()); });
 	connect(m_core, &ObsCore::studioModeChanged, this, [this] { updateStudio(); });
 	connect(m_core, &ObsCore::verticalChanged, this, [this](bool on) {
 		updateCanvasSwitch();
 		if (on)
-			say("Vertical canvas on. Switch to \"Vertical 9:16\" above the preview to arrange it; it follows the "
-			    "scene that's on air, cropped to the middle.");
+			say(L("Vertical canvas on. Switch to \"Vertical 9:16\" above the preview to arrange it; it follows the "
+			    "scene that's on air, cropped to the middle."));
 	});
 	connect(m_core, &ObsCore::verticalEditChanged, this, [this](bool on) {
 		updateCanvasSwitch();
@@ -287,7 +297,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	connect(m_core, &ObsCore::collectionChanged, this, [this] {
 		refreshScenes();
 		refreshSources();
-		say("Scene collection: " + m_core->collection());
+		say(L("Scene collection: ") + m_core->collection());
 	});
 	// Ctrl+Z / Ctrl+Y undo and redo; Ctrl+C / Ctrl+V copy a source's size and place to another
 	auto shortcut = [this](const QKeySequence &keys, auto fn) {
@@ -301,7 +311,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	shortcut(QKeySequence::Copy, [this] {
 		if (!selectedSource().isEmpty()) {
 			m_core->copyTransform(selectedSource());
-			say("Size and place copied. Select another source and press Ctrl+V.");
+			say(L("Size and place copied. Select another source and press Ctrl+V."));
 		}
 	});
 	shortcut(QKeySequence::Paste, [this] {
@@ -336,9 +346,20 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	applyHotkeys();
 
 	Settings &s = Settings::get();
+	applyLevel();
+	{
+		const QStringList a = QCoreApplication::arguments();
+		const bool test = std::any_of(a.begin(), a.end(), [](const QString &x) { return x.startsWith("--selftest") || x.startsWith("--demo"); });
+		if (!s.value("setup/done", false).toBool()) {
+			if (s.value("welcome/shown", false).toBool())
+				s.set("setup/done", true); // set up before the setup existed: keep everything as it is
+			else if (!test)
+				QTimer::singleShot(400, this, [this] { runSetup(); });
+		}
+	}
 	if (!s.value("welcome/shown", false).toBool()) {
 		const VideoPlan &p = m_core->plan();
-		say(QString("Auto-Tune set this PC to %1: %2p %3 fps with %4. Add a Game or Screen source to begin.")
+		say(QString(L("Auto-Tune set this PC to %1: %2p %3 fps with %4. Add a Game or Screen source to begin."))
 			    .arg(profileName(profileFromKey(s.value("video/profile").toString())))
 			    .arg(p.height)
 			    .arg(p.fps)
@@ -351,29 +372,29 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	connect(m_updater, &Updater::found, this, [this](const UpdateInfo &info) {
 		m_update = info;
 		m_installer.clear();
-		showUpdate(QString("<b>Zunimi Studio %1 is out.</b> %2").arg(info.version.toHtmlEscaped(),
+		showUpdate(QString(L("<b>Zunimi Studio %1 is out.</b> %2")).arg(info.version.toHtmlEscaped(),
 									     info.notes.toHtmlEscaped()),
-			   Updater::installed() ? "Update now" : "Download page", "Later");
+			   Updater::installed() ? L("Update now") : L("Download page"), L("Later"));
 	});
 	connect(m_updater, &Updater::nothing, this,
-		[this] { say(QString("You have the newest version (%1).").arg(ZUNIMI_VERSION)); });
+		[this] { say(QString(L("You have the newest version (%1).")).arg(ZUNIMI_VERSION)); });
 	connect(m_updater, &Updater::progress, this, [this](double f) {
-		m_updateText->setText(QString("Downloading Zunimi Studio %1... %2%")
+		m_updateText->setText(QString(L("Downloading Zunimi Studio %1... %2%"))
 					      .arg(m_update.version.toHtmlEscaped())
 					      .arg(int(f * 100)));
 	});
 	connect(m_updater, &Updater::ready, this, [this](const QString &path) {
 		m_installer = path;
-		showUpdate(QString("<b>Zunimi Studio %1 is ready to install.</b> It takes a few seconds and opens "
-				   "again by itself.")
+		showUpdate(QString(L("<b>Zunimi Studio %1 is ready to install.</b> It takes a few seconds and opens "
+				   "again by itself."))
 				   .arg(m_update.version.toHtmlEscaped()),
-			   "Restart and update", "Later");
+			   L("Restart and update"), L("Later"));
 	});
 	connect(m_updater, &Updater::failed, this, [this](const QString &reason) {
 		if (m_update.version.isEmpty())
 			say(reason, true);
 		else
-			showUpdate(reason.toHtmlEscaped(), "Try again", "Close");
+			showUpdate(reason.toHtmlEscaped(), L("Try again"), L("Close"));
 	});
 	const QString leftover = m_updater->afterStart();
 	if (!leftover.isEmpty())
@@ -404,27 +425,28 @@ QWidget *MainWindow::buildTopBar()
 	row->setSpacing(10);
 	auto *logo = new QLabel;
 	logo->setPixmap(QPixmap(":/logo-64.png").scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-	auto *brand = new QLabel("ZUNIMI STUDIO");
+	auto *brand = new QLabel(L("ZUNIMI STUDIO"));
 	brand->setObjectName("brand");
 	m_healthDot = new QLabel;
 	m_healthDot->setFixedSize(10, 10);
-	m_health = new QLabel("Ready");
+	m_health = new QLabel(L("Ready"));
 	m_stats = new QLabel;
 	m_stats->setObjectName("chip");
+	m_stats->setProperty("pro", true);
 	m_profile = new QLabel;
 	m_profile->setObjectName("chip");
-	auto *more = button("Menu", "", "Undo, scene collections, profiles, import, studio mode, projectors, virtual camera, stats");
+	auto *more = button(L("Menu"), "", L("Undo, scene collections, profiles, import, studio mode, projectors, virtual camera, stats"));
 	auto *mainMenu = new QMenu(more);
 	connect(mainMenu, &QMenu::aboutToShow, this, [this, mainMenu] { fillMainMenu(mainMenu); });
 	more->setMenu(mainMenu);
-	auto *settings = button("Settings", "", "Stream key, quality, recording, replay, hotkeys, window");
+	auto *settings = button(L("Settings"), "", L("Stream key, quality, recording, replay, hotkeys, window"));
 	connect(settings, &QPushButton::clicked, this, [this] { openSettings(); });
 	row->addWidget(logo);
 	row->addWidget(brand);
 	row->addSpacing(16);
 	row->addWidget(m_healthDot);
 	row->addWidget(m_health);
-	m_fix = button("Fix it", "primary", "Stream Doctor: one click to fix what the health bar shows");
+	m_fix = button(L("Fix it"), "primary", L("Stream Doctor: one click to fix what the health bar shows"));
 	m_fix->hide();
 	connect(m_fix, &QPushButton::clicked, this, [this] {
 		m_assist->applyFix(m_fixId);
@@ -444,17 +466,19 @@ QWidget *MainWindow::buildScenes()
 	auto *col = new QVBoxLayout;
 	col->setContentsMargins(12, 12, 12, 12);
 	col->setSpacing(8);
-	auto *title = new QLabel("Scenes");
+	auto *title = new QLabel(L("Scenes"));
 	title->setObjectName("h2");
 	m_scenes = new QListWidget;
-	m_scenes->setToolTip("Click to switch. Double-click to rename. Hotkeys for scenes 1-9 are in Settings > Hotkeys.");
+	m_scenes->setToolTip(L("Click to switch. Double-click to rename. Hotkeys for scenes 1-9 are in Settings > Hotkeys."));
 	m_scenes->setFixedHeight(128);
-	auto *add = button("+", "icon", "New scene");
-	auto *copy = button("Copy", "icon", "Duplicate this scene (sources are shared)");
-	auto *rename = button("Rename", "icon");
-	auto *remove = button("✕", "icon", "Remove this scene");
-	auto *up = button("↑", "icon", "Move up");
-	auto *down = button("↓", "icon", "Move down");
+	auto *add = button("+", "icon", L("New scene"));
+	auto *copy = button(L("Copy"), "icon", L("Duplicate this scene (sources are shared)"));
+	auto *rename = button(L("Rename"), "icon");
+	auto *remove = button("✕", "icon", L("Remove this scene"));
+	auto *up = button("↑", "icon", L("Move up"));
+	auto *down = button("↓", "icon", L("Move down"));
+	for (QPushButton *b : {copy, up, down})
+		b->setProperty("pro", true);
 	auto *tools = new QHBoxLayout;
 	tools->setSpacing(4);
 	for (QPushButton *b : {add, copy, rename, remove})
@@ -483,7 +507,7 @@ QWidget *MainWindow::buildScenes()
 	});
 	connect(m_transitionMs, &QSpinBox::editingFinished, this, applyTransition);
 	auto *transition = new QHBoxLayout;
-	auto *tlabel = new QLabel("Transition");
+	auto *tlabel = new QLabel(L("Transition"));
 	tlabel->setObjectName("mute");
 	transition->addWidget(tlabel);
 	transition->addWidget(m_transition, 1);
@@ -497,23 +521,30 @@ QWidget *MainWindow::buildScenes()
 	connect(m_scenes, &QListWidget::customContextMenuRequested, this,
 		[this](const QPoint &pos) { sceneMenu(m_scenes->viewport()->mapToGlobal(pos)); });
 	connect(m_scenes, &QListWidget::itemDoubleClicked, this, [this] { renameScene(); });
-	connect(add, &QPushButton::clicked, this, [this] {
+	auto *addMenu = new QMenu(add);
+	addMenu->addAction(L("Empty scene..."), this, [this] {
 		bool ok = false;
-		const QString name = QInputDialog::getText(this, "New scene", "Name", QLineEdit::Normal,
-							   QString("Scene %1").arg(m_core->scenes().size() + 1), &ok);
+		const QString name = QInputDialog::getText(this, L("New scene"), L("Name"), QLineEdit::Normal,
+							   QString(L("Scene %1")).arg(m_core->scenes().size() + 1), &ok);
 		if (ok)
 			m_core->addScene(name);
 	});
+	addMenu->addAction(L("From a template...  (Starting soon, BRB, Gaming...)"), this, [this] {
+		TemplatesDialog dialog(m_core, this);
+		if (dialog.exec() == QDialog::Accepted)
+			say(QString(L("\"%1\" added. Double-click the title to change its words.")).arg(dialog.added()));
+	});
+	add->setMenu(addMenu);
 	connect(copy, &QPushButton::clicked, this, [this] { m_core->duplicateScene(m_core->currentScene()); });
 	connect(rename, &QPushButton::clicked, this, [this] { renameScene(); });
 	connect(remove, &QPushButton::clicked, this, [this] {
 		const QString name = m_core->currentScene();
 		if (m_core->scenes().size() <= 1) {
-			say("A scene is always kept. Add another before removing this one.");
+			say(L("A scene is always kept. Add another before removing this one."));
 			return;
 		}
-		if (QMessageBox::question(this, "Remove scene",
-					  QString("Remove the scene \"%1\"? Sources that only this scene uses go too.")
+		if (QMessageBox::question(this, L("Remove scene"),
+					  QString(L("Remove the scene \"%1\"? Sources that only this scene uses go too."))
 						  .arg(name)) == QMessageBox::Yes)
 			m_core->removeScene(name);
 	});
@@ -523,7 +554,11 @@ QWidget *MainWindow::buildScenes()
 	col->addWidget(title);
 	col->addWidget(m_scenes);
 	col->addLayout(tools);
-	col->addLayout(transition);
+	auto *transitionBox = new QWidget;
+	transition->setContentsMargins(0, 0, 0, 0);
+	transitionBox->setLayout(transition);
+	transitionBox->setProperty("pro", true);
+	col->addWidget(transitionBox);
 	QWidget *w = panel(col);
 	w->setFixedWidth(310);
 	return w;
@@ -534,23 +569,25 @@ QWidget *MainWindow::buildSources()
 	auto *col = new QVBoxLayout;
 	col->setContentsMargins(12, 12, 12, 12);
 	col->setSpacing(8);
-	auto *title = new QLabel("Sources");
+	auto *title = new QLabel(L("Sources"));
 	title->setObjectName("h2");
 	m_sources = new QListWidget;
-	m_sources->setToolTip("Tick to show or hide. Double-click for its options. Right-click for more.");
+	m_sources->setToolTip(L("Tick to show or hide. Double-click for its options. Right-click for more."));
 	m_sources->setContextMenuPolicy(Qt::CustomContextMenu);
-	m_empty = new QLabel("Nothing here yet.\nAdd a Game or your Screen to start.");
+	m_sources->setSelectionMode(QAbstractItemView::ExtendedSelection); // Ctrl/Shift-click several to group them
+	m_empty = new QLabel(L("Nothing here yet.\nAdd a Game or your Screen to start."));
 	m_empty->setObjectName("mute");
 	m_empty->setAlignment(Qt::AlignCenter);
-	auto *add = button("+  Add source", "primary");
+	auto *add = button(L("+  Add source"), "primary");
 	auto *menu = new QMenu(add);
 	connect(menu, &QMenu::aboutToShow, this, [this, menu] { fillAddMenu(menu); });
 	add->setMenu(menu);
-	auto *up = button("↑", "icon", "Move up (in front)");
-	auto *down = button("↓", "icon", "Move down (behind)");
-	auto *props = button("Options", "icon", "Everything this source can do");
-	auto *filters = button("Filters", "icon", "Green screen, colour, crop, sharpen...");
-	auto *remove = button("✕", "icon", "Remove the selected source (Delete)");
+	auto *up = button("↑", "icon", L("Move up (in front)"));
+	auto *down = button("↓", "icon", L("Move down (behind)"));
+	auto *props = button(L("Options"), "icon", L("Everything this source can do"));
+	auto *filters = button(L("Filters"), "icon", L("Green screen, colour, crop, sharpen..."));
+	filters->setProperty("pro", true);
+	auto *remove = button("✕", "icon", L("Remove the selected source (Delete)"));
 	auto *tools = new QHBoxLayout;
 	tools->setSpacing(4);
 	tools->addWidget(up);
@@ -608,7 +645,7 @@ void MainWindow::fillAddMenu(QMenu *menu)
 	menu->clear();
 	auto offer = [this, menu](const Kind &k) {
 		if (obs_get_source_output_flags(k.id) != 0) // a module that is not loaded is not offered
-			menu->addAction(k.label, this, [this, id = QString(k.id)] { addSource(id); });
+			menu->addAction(L(k.label), this, [this, id = QString(k.id)] { addSource(id); });
 	};
 	offer(KINDS[0]); // game
 	// every screen by name, so a second or third monitor is one click away
@@ -617,12 +654,12 @@ void MainWindow::fillAddMenu(QMenu *menu)
 		menu->addAction(screenLabel(1, screens[0].first), this,
 				[this, s = screens[0]] { addScreen(s.second, screenLabel(1, s.first)); });
 	} else if (!screens.isEmpty()) {
-		QMenu *sub = menu->addMenu(QString("Screen  (%1 found)").arg(screens.size()));
+		QMenu *sub = menu->addMenu(QString(L("Screen  (%1 found)")).arg(screens.size()));
 		for (int i = 0; i < screens.size(); i++)
 			sub->addAction(screenLabel(i + 1, screens[i].first), this,
 				       [this, s = screens[i], i] { addScreen(s.second, screenLabel(i + 1, s.first)); });
 		sub->addSeparator();
-		sub->addAction("All screens, side by side", this, &MainWindow::addAllScreens);
+		sub->addAction(L("All screens, side by side"), this, &MainWindow::addAllScreens);
 	}
 	for (int i = 1; i < int(std::size(KINDS)); i++) {
 		if (i == 3 || i == 9)
@@ -630,20 +667,22 @@ void MainWindow::fillAddMenu(QMenu *menu)
 		offer(KINDS[i]);
 	}
 	menu->addSeparator();
-	QMenu *widgets = menu->addMenu("Alerts and widgets  (no browser needed)");
-	widgets->addAction("Alert box  (follows, subs, tips, raids...)", this, [this] { addOverlay("alerts"); });
-	widgets->addAction("Chat box  (Twitch, YouTube, Kick together)", this, [this] { addOverlay("chat"); });
-	widgets->addAction("Goal bar", this, [this] { addOverlay("goal"); });
-	widgets->addAction("Label  (latest follower, top tipper...)", this, [this] { addOverlay("label"); });
-	widgets->addAction("Timer  (countdown, subathon, clock)", this, [this] { addOverlay("timer"); });
-	widgets->addAction("Recent events list", this, [this] { addOverlay("events"); });
+	QMenu *widgets = menu->addMenu(L("Alerts and widgets  (no browser needed)"));
+	widgets->addAction(L("Alert box  (follows, subs, tips, raids...)"), this, [this] { addOverlay("alerts"); });
+	widgets->addAction(L("Chat box  (Twitch, YouTube, Kick together)"), this, [this] { addOverlay("chat"); });
+	widgets->addAction(L("Goal bar"), this, [this] { addOverlay("goal"); });
+	widgets->addAction(L("Label  (latest follower, top tipper...)"), this, [this] { addOverlay("label"); });
+	widgets->addAction(L("Timer  (countdown, subathon, clock)"), this, [this] { addOverlay("timer"); });
+	widgets->addAction(L("Recent events list"), this, [this] { addOverlay("events"); });
 	widgets->addSeparator();
-	widgets->addAction("StreamElements / Streamlabs overlay or widget link...", this, [this] { addBrowser(true); });
-	menu->addAction("Web page  (browser source)", this, [this] { addBrowser(false); });
+	widgets->addAction(L("StreamElements / Streamlabs overlay or widget link..."), this, [this] { addBrowser(true); });
+	menu->addAction(L("Web page  (browser source)"), this, [this] { addBrowser(false); });
+	if (simple())
+		return;
 	const QStringList nestable = m_core->nestableScenes();
 	if (!nestable.isEmpty()) {
 		menu->addSeparator();
-		QMenu *sub = menu->addMenu("Another scene  (inside this one)");
+		QMenu *sub = menu->addMenu(L("Another scene  (inside this one)"));
 		for (const QString &name : nestable)
 			sub->addAction(name, this, [this, name] {
 				m_core->addExisting(name);
@@ -653,7 +692,7 @@ void MainWindow::fillAddMenu(QMenu *menu)
 	const QStringList existing = m_core->otherScenesSources();
 	if (!existing.isEmpty()) {
 		menu->addSeparator();
-		QMenu *sub = menu->addMenu("From another scene");
+		QMenu *sub = menu->addMenu(L("From another scene"));
 		for (const QString &name : existing)
 			sub->addAction(name, this, [this, name] {
 				m_core->addExisting(name);
@@ -671,10 +710,10 @@ QWidget *MainWindow::buildPreview()
 	m_preview->setToolTip({});
 	auto *paused = new QWidget;
 	auto *pausedCol = new QVBoxLayout(paused);
-	auto *note = new QLabel("Preview paused to give your PC more power.\nYour stream and recording are not affected.");
+	auto *note = new QLabel(L("Preview paused to give your PC more power.\nYour stream and recording are not affected."));
 	note->setObjectName("preview_note");
 	note->setAlignment(Qt::AlignCenter);
-	auto *show = button("Show preview");
+	auto *show = button(L("Show preview"));
 	connect(show, &QPushButton::clicked, this, [this] {
 		m_previewWanted = true;
 		Settings::get().set("preview/pauseWhileLive", false);
@@ -696,15 +735,15 @@ QWidget *MainWindow::buildPreview()
 	connect(m_preview, &PreviewWidget::menuRequested, this, &MainWindow::sourceMenu);
 
 	// Studio mode: the edited scene on the left, what is on air on the right.
-	m_previewTitle = new QLabel("Preview  (edit here, then Go)");
+	m_previewTitle = new QLabel(L("Preview  (edit here, then Go)"));
 	m_previewTitle->setObjectName("mute");
-	m_landscapeButton = button("Landscape  16:9", "", "Edit the normal picture");
-	m_verticalButton = button("Vertical  9:16", "", "Edit the vertical picture (Shorts, Reels, TikTok)");
+	m_landscapeButton = button(L("Landscape  16:9"), "", L("Edit the normal picture"));
+	m_verticalButton = button(L("Vertical  9:16"), "", L("Edit the vertical picture (Shorts, Reels, TikTok)"));
 	for (QPushButton *b : {m_landscapeButton, m_verticalButton})
 		b->setCheckable(true);
 	connect(m_landscapeButton, &QPushButton::clicked, this, [this] { m_core->setEditVertical(false); });
 	connect(m_verticalButton, &QPushButton::clicked, this, [this] { m_core->setEditVertical(true); });
-	auto *verticalMore = button("⋯", "icon", "Vertical canvas settings");
+	auto *verticalMore = button("⋯", "icon", L("Vertical canvas settings"));
 	connect(verticalMore, &QPushButton::clicked, this, &MainWindow::verticalSettings);
 	m_canvasSwitch = new QWidget;
 	auto *switchRow = new QHBoxLayout(m_canvasSwitch);
@@ -720,9 +759,9 @@ QWidget *MainWindow::buildPreview()
 	left->addWidget(m_previewTitle);
 	left->addWidget(m_previewStack, 1);
 	m_program = new PreviewWidget(m_core, PreviewWidget::Mode::Program);
-	auto *onAir = new QLabel("On air");
+	auto *onAir = new QLabel(L("On air"));
 	onAir->setObjectName("mute");
-	auto *go = button("Go", "primary", "Send the preview live with the scene's transition (hotkey in Settings > Hotkeys)");
+	auto *go = button(L("Go"), "primary", L("Send the preview live with the scene's transition (hotkey in Settings > Hotkeys)"));
 	connect(go, &QPushButton::clicked, m_core, &ObsCore::transitionNow);
 	auto *programCol = new QVBoxLayout;
 	programCol->setContentsMargins(0, 0, 0, 0);
@@ -747,21 +786,22 @@ QWidget *MainWindow::buildBottomBar()
 	auto *row = new QHBoxLayout;
 	row->setContentsMargins(14, 10, 14, 10);
 	row->setSpacing(12);
-	auto *hint = new QLabel("Drag sources in the preview to move them, drag a corner to resize. Right-click for more.");
+	auto *hint = new QLabel(L("Drag sources in the preview to move them, drag a corner to resize. Right-click for more."));
 	hint->setObjectName("mute");
 	row->addWidget(hint, 1);
 	m_clock = new QLabel;
 	m_clock->setObjectName("mute");
-	m_replay = button("Replay buffer", "", "Keeps the last seconds in memory so you can save a moment after it happens");
+	m_replay = button(L("Replay buffer"), "", L("Keeps the last seconds in memory so you can save a moment after it happens"));
 	m_replay->setCheckable(true);
-	m_saveReplay = button("Save replay", "", "Saves the last seconds as an MP4 (set a hotkey in Settings > Hotkeys)");
-	m_rec = button("Record", "rec", "Start or stop recording");
-	m_pause = button("Pause", "", "Pause the recording without ending the file");
-	m_vcam = button("Virtual camera", "", "Use what's on air as a webcam in Discord, Zoom, Meet and other apps");
+	m_saveReplay = button(L("Save replay"), "", L("Saves the last seconds as an MP4 (set a hotkey in Settings > Hotkeys)"));
+	m_rec = button(L("Record"), "rec", L("Start or stop recording"));
+	m_pause = button(L("Pause"), "", L("Pause the recording without ending the file"));
+	m_vcam = button(L("Virtual camera"), "", L("Use what's on air as a webcam in Discord, Zoom, Meet and other apps"));
 	m_vcam->setCheckable(true);
+	m_vcam->setProperty("pro", true);
 	connect(m_pause, &QPushButton::clicked, this, &MainWindow::togglePause);
 	connect(m_vcam, &QPushButton::clicked, this, &MainWindow::toggleVirtualCam);
-	m_live = button("Go Live", "live", "Start or stop streaming");
+	m_live = button(L("Go Live"), "live", L("Start or stop streaming"));
 	connect(m_replay, &QPushButton::clicked, this, &MainWindow::toggleReplay);
 	connect(m_saveReplay, &QPushButton::clicked, this, &MainWindow::saveReplay);
 	connect(m_rec, &QPushButton::clicked, this, &MainWindow::toggleRecord);
@@ -784,8 +824,8 @@ QWidget *MainWindow::buildUpdateBar()
 	m_updateText = new QLabel;
 	m_updateText->setWordWrap(true);
 	m_updateText->setTextFormat(Qt::RichText);
-	m_updateGo = button("Update now", "primary");
-	m_updateLater = button("Later");
+	m_updateGo = button(L("Update now"), "primary");
+	m_updateLater = button(L("Later"));
 	connect(m_updateGo, &QPushButton::clicked, this, &MainWindow::updateClicked);
 	connect(m_updateLater, &QPushButton::clicked, this, [this] {
 		m_updater->cancel();
@@ -803,15 +843,15 @@ QWidget *MainWindow::buildUpdateBar()
 void MainWindow::buildTray()
 {
 	QMenu *menu = m_modes->trayMenu();
-	m_trayLive = menu->addAction("Go Live", this, &MainWindow::toggleStream);
-	m_trayRec = menu->addAction("Start recording", this, &MainWindow::toggleRecord);
-	m_trayReplay = menu->addAction("Save replay", this, &MainWindow::saveReplay);
+	m_trayLive = menu->addAction(L("Go Live"), this, &MainWindow::toggleStream);
+	m_trayRec = menu->addAction(L("Start recording"), this, &MainWindow::toggleRecord);
+	m_trayReplay = menu->addAction(L("Save replay"), this, &MainWindow::saveReplay);
 	menu->addSeparator();
-	menu->addAction("Settings", this, [this] {
+	menu->addAction(L("Settings"), this, [this] {
 		m_modes->showAgain();
 		openSettings();
 	});
-	menu->addAction("Quit Zunimi Studio", m_modes, [this] { m_modes->quit(); });
+	menu->addAction(L("Quit Zunimi Studio"), m_modes, [this] { m_modes->quit(); });
 }
 
 // ---- scenes
@@ -828,9 +868,9 @@ void MainWindow::refreshScenes()
 		item->setData(Qt::UserRole, names[i]);
 		if (live)
 			item->setForeground(Theme::Live);
-		QString tip = i < 9 ? QString("Scene %1").arg(i + 1) : QString();
+		QString tip = i < 9 ? QString(L("Scene %1")).arg(i + 1) : QString();
 		if (!m_core->sceneTransition(names[i]).first.isEmpty())
-			tip += (tip.isEmpty() ? "" : "  ·  ") + QString("Own transition");
+			tip += (tip.isEmpty() ? "" : "  ·  ") + QString(L("Own transition"));
 		item->setToolTip(tip);
 		m_scenes->addItem(item);
 		if (names[i] == m_core->currentScene())
@@ -844,9 +884,9 @@ void MainWindow::renameScene()
 {
 	const QString from = m_core->currentScene();
 	bool ok = false;
-	const QString to = QInputDialog::getText(this, "Rename scene", "Name", QLineEdit::Normal, from, &ok);
+	const QString to = QInputDialog::getText(this, L("Rename scene"), L("Name"), QLineEdit::Normal, from, &ok);
 	if (ok && !m_core->renameScene(from, to))
-		say("That name is already used by a scene or source.", true);
+		say(L("That name is already used by a scene or source."), true);
 }
 
 // ---- sources
@@ -870,14 +910,21 @@ void MainWindow::refreshSources()
 	const QString current = selectedSource();
 	m_sources->clear();
 	for (const SceneItem &item : m_core->items()) {
-		auto *row = new QListWidgetItem(item.locked ? item.name + "  🔒" : item.name);
+		QString text = item.locked ? item.name + "  🔒" : item.name;
+		if (item.isGroup)
+			text = "▾ " + text;
+		else if (!item.group.isEmpty())
+			text = "      " + text; // inside the group above
+		auto *row = new QListWidgetItem(text);
 		row->setData(Qt::UserRole, item.name);
 		row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
 		row->setCheckState(item.visible ? Qt::Checked : Qt::Unchecked);
-		if (const Kind *k = kindOf(item.kind))
-			row->setToolTip(QString(k->label).section("  ", 0, 0));
+		if (item.isGroup)
+			row->setToolTip(L("Group: its sources move, hide and lock together. Right-click to ungroup."));
+		else if (const Kind *k = kindOf(item.kind))
+			row->setToolTip(QString(L(k->label)).section("  ", 0, 0));
 		else if (item.kind == "monitor_capture")
-			row->setToolTip("Screen");
+			row->setToolTip(L("Screen"));
 		m_sources->addItem(row);
 		if (item.name == current)
 			m_sources->setCurrentItem(row);
@@ -895,11 +942,11 @@ void MainWindow::addScreen(const QString &id, const QString &label)
 	obs_source_t *source = m_core->addSource("monitor_capture", label.section("  ", 0, 0), s, ObsCore::Fit::Fill);
 	obs_data_release(s);
 	if (!source) {
-		say("That screen could not be captured.", true);
+		say(L("That screen could not be captured."), true);
 		return;
 	}
 	selectSource(QString::fromUtf8(obs_source_get_name(source)));
-	say(label.section("  ", 0, 0) + " added. Drag a corner in the preview to make it smaller.");
+	say(label.section("  ", 0, 0) + L(" added. Drag a corner in the preview to make it smaller."));
 }
 
 void MainWindow::addAllScreens()
@@ -925,7 +972,7 @@ void MainWindow::addAllScreens()
 				    QRectF(offset + r.topLeft() * scale, r.size() * scale));
 		obs_data_release(s);
 	}
-	say(QString("All %1 screens added side by side.").arg(screens.size()));
+	say(QString(L("All %1 screens added side by side.")).arg(screens.size()));
 }
 
 void MainWindow::addSource(const QString &id)
@@ -955,7 +1002,7 @@ void MainWindow::addSource(const QString &id)
 	obs_source_t *source = m_core->addSource(kind->id, kind->name, s, kind->fit);
 	obs_data_release(s);
 	if (!source) {
-		say("That source could not be added on this PC.", true);
+		say(L("That source could not be added on this PC."), true);
 		return;
 	}
 	const QString name = QString::fromUtf8(obs_source_get_name(source));
@@ -963,8 +1010,8 @@ void MainWindow::addSource(const QString &id)
 	if (kind->ask)
 		openProperties(name, true);
 	else if (id == "game_capture")
-		say("Game added. Start your game in fullscreen and it appears here by itself. Anti-cheat games "
-		    "(Valorant and others) may need a Screen source instead for now.");
+		say(L("Game added. Start your game in fullscreen and it appears here by itself. Anti-cheat games "
+		    "(Valorant and others) may need a Screen source instead for now."));
 	if (id == "dshow_input" || id == "ffmpeg_source")
 		m_core->fit(name, kind->fit); // its real size is known now
 }
@@ -995,11 +1042,11 @@ void MainWindow::openFilters(obs_source_t *source)
 void MainWindow::renameSource(const QString &name)
 {
 	bool ok = false;
-	const QString to = QInputDialog::getText(this, "Rename", "Name", QLineEdit::Normal, name, &ok);
+	const QString to = QInputDialog::getText(this, L("Rename"), L("Name"), QLineEdit::Normal, name, &ok);
 	if (!ok)
 		return;
 	if (!m_core->renameSource(name, to))
-		say("That name is already used by a scene or source.", true);
+		say(L("That name is already used by a scene or source."), true);
 	else
 		selectSource(to.trimmed());
 }
@@ -1024,49 +1071,66 @@ void MainWindow::sourceMenu(const QString &requested, const QPoint &global)
 	obs_source_t *source = obs_sceneitem_get_source(item);
 	const uint32_t flags = obs_source_get_output_flags(source);
 	const bool hasVideo = flags & OBS_SOURCE_VIDEO;
-	menu.addAction("Options...", this, [this, name] { openProperties(name); });
-	menu.addAction("Filters...", this, [this, source] { openFilters(source); });
+	// groups: several selected sources become one; a group can be taken apart again
+	QStringList picked;
+	for (QListWidgetItem *row : m_sources->selectedItems())
+		picked << row->data(Qt::UserRole).toString();
+	if (picked.size() >= 2) {
+		menu.addAction(QString(L("Group the %1 selected sources...")).arg(picked.size()), this, [this, picked] {
+			bool ok = false;
+			const QString group = QInputDialog::getText(this, L("Group"), L("Name"), QLineEdit::Normal, L("Group"), &ok);
+			if (ok && m_core->groupItems(picked, group).isEmpty())
+				say(L("Sources already in a group can't go in another one."), true);
+		});
+		menu.addSeparator();
+	}
+	if (obs_sceneitem_is_group(item)) {
+		menu.addAction(L("Ungroup"), this, [this, name] { m_core->ungroup(name); });
+		menu.addSeparator();
+	}
+	menu.addAction(L("Options..."), this, [this, name] { openProperties(name); });
+	menu.addAction(L("Filters..."), this, [this, source] { openFilters(source); });
 	if (flags & OBS_SOURCE_AUDIO)
-		menu.addAction("Sound settings...", this, [this, source] { openAudio(source); });
-	menu.addAction("Rename...", this, [this, name] { renameSource(name); });
+		menu.addAction(L("Sound settings..."), this, [this, source] { openAudio(source); });
+	menu.addAction(L("Rename..."), this, [this, name] { renameSource(name); });
 	if (flags & OBS_SOURCE_CONTROLLABLE_MEDIA) {
-		QMenu *media = menu.addMenu("Play");
+		QMenu *media = menu.addMenu(L("Play"));
 		const bool playing = obs_source_media_get_state(source) == OBS_MEDIA_STATE_PLAYING;
-		media->addAction(playing ? "Pause" : "Play", this, [source, playing] { obs_source_media_play_pause(source, playing); });
-		media->addAction("Restart", this, [source] { obs_source_media_restart(source); });
-		media->addAction("Stop", this, [source] { obs_source_media_stop(source); });
-		media->addAction("Next", this, [source] { obs_source_media_next(source); });
-		media->addAction("Previous", this, [source] { obs_source_media_previous(source); });
+		media->addAction(playing ? L("Pause") : L("Play"), this, [source, playing] { obs_source_media_play_pause(source, playing); });
+		media->addAction(L("Restart"), this, [source] { obs_source_media_restart(source); });
+		media->addAction(L("Stop"), this, [source] { obs_source_media_stop(source); });
+		media->addAction(L("Next"), this, [source] { obs_source_media_next(source); });
+		media->addAction(L("Previous"), this, [source] { obs_source_media_previous(source); });
 	}
 	if (hasVideo) {
 		menu.addSeparator();
-		QMenu *size = menu.addMenu("Size and place");
+		QMenu *size = menu.addMenu(L("Size and place"));
 		size->setEnabled(!locked);
-		size->addAction("Fit to screen", this, [this, name] { m_core->fit(name, ObsCore::Fit::Fill); });
-		size->addAction("Stretch to screen", this, [this, name] { m_core->fit(name, ObsCore::Fit::Stretch); });
-		size->addAction("Centre, original size", this, [this, name] { m_core->fit(name, ObsCore::Fit::Center); });
-		size->addAction("Bottom-right corner", this, [this, name] { m_core->fit(name, ObsCore::Fit::Corner); });
-		size->addAction("Left half", this, [this, name] { m_core->fit(name, ObsCore::Fit::Left); });
-		size->addAction("Right half", this, [this, name] { m_core->fit(name, ObsCore::Fit::Right); });
+		size->addAction(L("Fit to screen"), this, [this, name] { m_core->fit(name, ObsCore::Fit::Fill); });
+		size->addAction(L("Stretch to screen"), this, [this, name] { m_core->fit(name, ObsCore::Fit::Stretch); });
+		size->addAction(L("Centre, original size"), this, [this, name] { m_core->fit(name, ObsCore::Fit::Center); });
+		size->addAction(L("Bottom-right corner"), this, [this, name] { m_core->fit(name, ObsCore::Fit::Corner); });
+		size->addAction(L("Left half"), this, [this, name] { m_core->fit(name, ObsCore::Fit::Left); });
+		size->addAction(L("Right half"), this, [this, name] { m_core->fit(name, ObsCore::Fit::Right); });
 		size->addSeparator();
-		size->addAction("Edit size and place...", this, [this, name] { openTransform(name); });
-		size->addAction("Reset (original size, top-left)", this, [this, name] { m_core->resetTransform(name); });
+		size->addAction(L("Edit size and place..."), this, [this, name] { openTransform(name); });
+		size->addAction(L("Reset (original size, top-left)"), this, [this, name] { m_core->resetTransform(name); });
 
-		QMenu *turn = menu.addMenu("Rotate and flip");
+		QMenu *turn = menu.addMenu(L("Rotate and flip"));
 		turn->setEnabled(!locked);
-		turn->addAction("Rotate 90 degrees right  (Ctrl+R)", this, [this, name] { m_core->rotate(name, 90); });
-		turn->addAction("Rotate 90 degrees left", this, [this, name] { m_core->rotate(name, -90); });
-		turn->addAction("Rotate 180 degrees", this, [this, name] { m_core->rotate(name, 180); });
+		turn->addAction(L("Rotate 90 degrees right  (Ctrl+R)"), this, [this, name] { m_core->rotate(name, 90); });
+		turn->addAction(L("Rotate 90 degrees left"), this, [this, name] { m_core->rotate(name, -90); });
+		turn->addAction(L("Rotate 180 degrees"), this, [this, name] { m_core->rotate(name, 180); });
 		turn->addSeparator();
-		turn->addAction("Flip left-right (mirror)", this, [this, name] { m_core->flip(name, true); });
-		turn->addAction("Flip upside down", this, [this, name] { m_core->flip(name, false); });
+		turn->addAction(L("Flip left-right (mirror)"), this, [this, name] { m_core->flip(name, true); });
+		turn->addAction(L("Flip upside down"), this, [this, name] { m_core->flip(name, false); });
 
-		QMenu *copy = menu.addMenu("Copy size and place");
-		copy->addAction("Copy  (Ctrl+C)", this, [this, name] { m_core->copyTransform(name); });
-		QAction *paste = copy->addAction("Paste  (Ctrl+V)", this, [this, name] { m_core->pasteTransform(name); });
+		QMenu *copy = menu.addMenu(L("Copy size and place"));
+		copy->addAction(L("Copy  (Ctrl+C)"), this, [this, name] { m_core->copyTransform(name); });
+		QAction *paste = copy->addAction(L("Paste  (Ctrl+V)"), this, [this, name] { m_core->pasteTransform(name); });
 		paste->setEnabled(m_core->hasCopiedTransform() && !locked);
 
-		QMenu *look = menu.addMenu("Look");
+		QMenu *look = menu.addMenu(L("Look"));
 		QMenu *blend = look->addMenu("Blend mode");
 		const std::pair<obs_blending_type, const char *> blends[] = {
 			{OBS_BLEND_NORMAL, "Normal"},
@@ -1078,7 +1142,7 @@ void MainWindow::sourceMenu(const QString &requested, const QPoint &global)
 			{OBS_BLEND_DARKEN, "Darken"}};
 		const obs_blending_type nowBlend = obs_sceneitem_get_blending_mode(item);
 		for (const auto &[type, label] : blends) {
-			QAction *a = blend->addAction(label, this, [this, name, type = type] { m_core->setBlend(name, type); });
+			QAction *a = blend->addAction(L(label), this, [this, name, type = type] { m_core->setBlend(name, type); });
 			a->setCheckable(true);
 			a->setChecked(type == nowBlend);
 		}
@@ -1092,7 +1156,7 @@ void MainWindow::sourceMenu(const QString &requested, const QPoint &global)
 			{OBS_SCALE_AREA, "Area (best when shrinking)"}};
 		const obs_scale_type nowScale = obs_sceneitem_get_scale_filter(item);
 		for (const auto &[type, label] : scales) {
-			QAction *a = scaling->addAction(label, this, [this, name, type = type] { m_core->setScaleFilter(name, type); });
+			QAction *a = scaling->addAction(L(label), this, [this, name, type = type] { m_core->setScaleFilter(name, type); });
 			a->setCheckable(true);
 			a->setChecked(type == nowScale);
 		}
@@ -1101,24 +1165,24 @@ void MainWindow::sourceMenu(const QString &requested, const QPoint &global)
 		const std::pair<const char *, const char *> effects[] = {
 			{"", "None"}, {"fade_transition", "Fade"}, {"slide_transition", "Slide"}, {"swipe_transition", "Swipe"}};
 		for (const auto &[id, label] : effects) {
-			QAction *a = effect->addAction(label, this, [this, name, id = QString(id)] { m_core->setShowHide(name, id, 300); });
+			QAction *a = effect->addAction(L(label), this, [this, name, id = QString(id)] { m_core->setShowHide(name, id, 300); });
 			a->setCheckable(true);
 			a->setChecked(nowEffect == id);
 		}
-		QMenu *extra = menu.addMenu("Projector and screenshot");
-		extra->addAction("Screenshot of this source", this, [this, source] { screenshot(source); });
-		fillProjectorMenu(extra->addMenu("Projector of this source"), source);
+		QMenu *extra = menu.addMenu(L("Projector and screenshot"));
+		extra->addAction(L("Screenshot of this source"), this, [this, source] { screenshot(source); });
+		fillProjectorMenu(extra->addMenu(L("Projector of this source")), source);
 	}
 	menu.addSeparator();
-	menu.addAction(locked ? "Unlock" : "Lock in place", this, [this, name, locked] { m_core->setLocked(name, !locked); });
-	menu.addAction(visible ? "Hide" : "Show", this, [this, name, visible] {
+	menu.addAction(locked ? L("Unlock") : L("Lock in place"), this, [this, name, locked] { m_core->setLocked(name, !locked); });
+	menu.addAction(visible ? L("Hide") : L("Show"), this, [this, name, visible] {
 		m_core->setVisible(name, !visible);
 		refreshSources();
 	});
-	menu.addAction("Move up", this, [this, name] { m_core->moveSource(name, true); });
-	menu.addAction("Move down", this, [this, name] { m_core->moveSource(name, false); });
+	menu.addAction(L("Move up"), this, [this, name] { m_core->moveSource(name, true); });
+	menu.addAction(L("Move down"), this, [this, name] { m_core->moveSource(name, false); });
 	menu.addSeparator();
-	menu.addAction("Remove", this, [this, name] { m_core->removeSource(name); });
+	menu.addAction(L("Remove"), this, [this, name] { m_core->removeSource(name); });
 	menu.exec(global);
 }
 
@@ -1127,14 +1191,14 @@ void MainWindow::toggleStream()
 {
 	if (m_core->streaming()) {
 		m_core->stopStream();
-		say("Stream ended.");
+		say(L("Stream ended."));
 		return;
 	}
 	Settings &s = Settings::get();
 	const QString key = s.secret("stream/key");
 	const bool whip = s.value("stream/platform").toString() == "whip"; // WHIP may not need a token
 	if ((key.isEmpty() && !whip) || s.value("stream/server").toString().isEmpty()) {
-		say("Add your stream key to go live.");
+		say(L("Add your stream key to go live."));
 		m_modes->showAgain();
 		openSettings(SettingsDialog::Stream);
 		return;
@@ -1143,9 +1207,9 @@ void MainWindow::toggleStream()
 		return;
 	QString error;
 	m_live->setEnabled(false);
-	m_live->setText("Connecting...");
+	m_live->setText(L("Connecting..."));
 	if (!m_core->startStream(s.value("stream/server").toString(), key, &error)) {
-		say("Could not go live: " + error, true);
+		say(L("Could not go live: ") + error, true);
 		updateButtons();
 	}
 }
@@ -1158,7 +1222,7 @@ void MainWindow::toggleRecord()
 	}
 	QString error;
 	if (!m_core->startRecording(Settings::get().value("record/folder", defaultFolder()).toString(), &error))
-		say("Could not record: " + error, true);
+		say(L("Could not record: ") + error, true);
 }
 
 void MainWindow::toggleReplay()
@@ -1171,7 +1235,7 @@ void MainWindow::toggleReplay()
 	Settings &s = Settings::get();
 	if (!m_core->startReplay(s.value("record/folder", defaultFolder()).toString(), s.value("replay/seconds", 30).toInt(),
 				 &error)) {
-		say("Could not start the replay buffer: " + error, true);
+		say(L("Could not start the replay buffer: ") + error, true);
 		updateButtons();
 	}
 }
@@ -1179,7 +1243,7 @@ void MainWindow::toggleReplay()
 void MainWindow::saveReplay()
 {
 	if (!m_core->replaying()) {
-		say("Turn on the Replay buffer first; then Save replay keeps the moment that just happened.");
+		say(L("Turn on the Replay buffer first; then Save replay keeps the moment that just happened."));
 		return;
 	}
 	m_core->saveReplay();
@@ -1204,7 +1268,7 @@ void MainWindow::hotkey(const QString &action)
 		obs_source_set_muted(source, muted);
 		Settings::get().set(mic ? "audio/micMuted" : "audio/desktopMuted", muted);
 		m_mixer->refresh(true);
-		say(QString("%1 %2.").arg(mic ? "Mic" : "Desktop audio", muted ? "muted" : "on"));
+		say(QString("%1 %2.").arg(mic ? L("Mic") : "Desktop audio", muted ? "muted" : "on"));
 	} else if (action == "ptt:down" || action == "ptt:up" || action == "ptm:down" || action == "ptm:up") {
 		obs_source_t *mic = m_core->microphone();
 		if (!mic)
@@ -1234,12 +1298,19 @@ void MainWindow::hotkey(const QString &action)
 	}
 }
 
+void MainWindow::applyRemote()
+{
+	QString error;
+	if (!m_remote->apply(&error))
+		say(L("The remote could not start: ") + error, true);
+}
+
 void MainWindow::applyHotkeys()
 {
 	const QStringList failed = m_hotkeys->apply();
 	if (!failed.isEmpty())
-		say("Another program already uses these hotkeys, so they won't work here: " + failed.join(", ") +
-			    ". Pick different keys in Settings > Hotkeys.",
+		say(L("Another program already uses these hotkeys, so they won't work here: ") + failed.join(", ") +
+			    L(". Pick different keys in Settings > Hotkeys."),
 		    true);
 }
 
@@ -1247,28 +1318,28 @@ void MainWindow::updateButtons()
 {
 	const bool live = m_core->streaming(), rec = m_core->recording(), replay = m_core->replaying();
 	m_live->setEnabled(true);
-	m_live->setText(live ? "End stream" : "Go Live");
+	m_live->setText(live ? L("End stream") : L("Go Live"));
 	m_live->setProperty("on", live);
-	m_rec->setText(rec ? "Stop recording" : "Record");
+	m_rec->setText(rec ? L("Stop recording") : L("Record"));
 	m_rec->setProperty("on", rec);
 	m_replay->setChecked(replay);
-	m_replay->setText(replay ? "Replay buffer: on" : "Replay buffer");
+	m_replay->setText(replay ? L("Replay buffer: on") : L("Replay buffer"));
 	m_replay->setProperty("on", replay);
 	m_saveReplay->setEnabled(replay);
 	m_pause->setVisible(rec);
-	m_pause->setText(m_core->recordingPaused() ? "Resume" : "Pause");
+	m_pause->setText(m_core->recordingPaused() ? L("Resume") : L("Pause"));
 	m_pause->setProperty("on", m_core->recordingPaused());
 	restyle(m_pause);
 	const bool vcam = m_core->virtualCam();
 	m_vcam->setChecked(vcam);
-	m_vcam->setText(vcam ? "Virtual camera: on" : "Virtual camera");
+	m_vcam->setText(vcam ? L("Virtual camera: on") : L("Virtual camera"));
 	m_vcam->setProperty("on", vcam);
 	restyle(m_vcam);
 	restyle(m_live);
 	restyle(m_rec);
 	restyle(m_replay);
-	m_trayLive->setText(live ? "End stream" : "Go Live");
-	m_trayRec->setText(rec ? "Stop recording" : "Start recording");
+	m_trayLive->setText(live ? L("End stream") : L("Go Live"));
+	m_trayRec->setText(rec ? L("Stop recording") : L("Start recording"));
 	m_trayReplay->setEnabled(replay);
 	if (!live && !rec)
 		m_clock->clear();
@@ -1280,8 +1351,15 @@ void MainWindow::openSettings(int tab)
 	dialog.checkUpdates = [this] { checkForUpdates(); };
 	dialog.openTab(SettingsDialog::Tab(tab));
 	if (dialog.exec() == QDialog::Accepted) {
-		say("Settings saved.");
+		say(L("Settings saved."));
+		if (Settings::get().value("ui/language", "en").toString() != i18n::language() &&
+		    QMessageBox::question(this, L("Language"), L("Restart Zunimi Studio now to switch the language?")) ==
+			    QMessageBox::Yes) {
+			restartApp();
+			return;
+		}
 		applyHotkeys();
+		applyRemote();
 		updatePreview();
 	}
 }
@@ -1299,7 +1377,7 @@ void MainWindow::tick()
 	const QColor dot = h.level == 2 ? Theme::Live : h.level == 1 ? Theme::Warn : Theme::Good;
 	m_healthDot->setStyleSheet(QString("background:%1; border-radius:5px;").arg(dot.name()));
 	m_health->setText(h.text);
-	m_stats->setText(QString("CPU %1%  ·  RAM %2 MB  ·  %3 fps")
+	m_stats->setText(QString(L("CPU %1%  ·  RAM %2 MB  ·  %3 fps"))
 				 .arg(h.cpu, 0, 'f', 0)
 				 .arg(h.ramMb, 0, 'f', 0)
 				 .arg(h.fps, 0, 'f', 0));
@@ -1311,12 +1389,12 @@ void MainWindow::tick()
 				   .arg(encoderLabel(p.encoder)));
 	if (m_core->streaming() && m_liveSince.isValid()) {
 		const qint64 secs = m_liveSince.elapsed() / 1000;
-		m_clock->setText(QString("LIVE  %1:%2:%3")
+		m_clock->setText(QString(L("LIVE  %1:%2:%3"))
 					 .arg(secs / 3600, 2, 10, QChar('0'))
 					 .arg((secs / 60) % 60, 2, 10, QChar('0'))
 					 .arg(secs % 60, 2, 10, QChar('0')));
 	} else if (m_core->recording()) {
-		m_clock->setText(m_core->recordingPaused() ? "Recording paused" : "Recording");
+		m_clock->setText(m_core->recordingPaused() ? L("Recording paused") : L("Recording"));
 	}
 }
 
@@ -1343,9 +1421,9 @@ void MainWindow::say(const QString &text, bool bad)
 QString MainWindow::quitWouldStop() const
 {
 	if (m_core->streaming())
-		return "You're live. Quitting ends the stream.";
+		return L("You're live. Quitting ends the stream.");
 	if (m_core->recording())
-		return "A recording is running. Quitting stops and saves it.";
+		return L("A recording is running. Quitting stops and saves it.");
 	return {};
 }
 
@@ -1367,19 +1445,19 @@ void MainWindow::updateClicked()
 		return;
 	}
 	if (!quitWouldStop().isEmpty()) {
-		say("Finish your stream or recording first: updating restarts Zunimi Studio.", true);
+		say(L("Finish your stream or recording first: updating restarts Zunimi Studio."), true);
 		return;
 	}
 	if (m_installer.isEmpty()) {
 		m_updateGo->setEnabled(false);
-		m_updateLater->setText("Cancel");
-		m_updateText->setText(QString("Downloading Zunimi Studio %1...").arg(m_update.version.toHtmlEscaped()));
+		m_updateLater->setText(L("Cancel"));
+		m_updateText->setText(QString(L("Downloading Zunimi Studio %1...")).arg(m_update.version.toHtmlEscaped()));
 		m_updater->download(m_update);
 		return;
 	}
 	if (!m_updater->launch(m_installer)) {
-		showUpdate("The installer could not be started. Try again, or download it from the release page.",
-			   "Try again", "Close");
+		showUpdate(L("The installer could not be started. Try again, or download it from the release page."),
+			   L("Try again"), L("Close"));
 		m_installer.clear();
 		return;
 	}
@@ -1410,62 +1488,174 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::fillMainMenu(QMenu *menu)
 {
 	menu->clear();
-	QAction *undo = menu->addAction(m_core->canUndo() ? "Undo " + m_core->undoLabel() : "Undo", this,
+	const bool easy = simple();
+	QAction *undo = menu->addAction(m_core->canUndo() ? L("Undo ") + m_core->undoLabel() : L("Undo"), this,
 					[this] { m_core->undo(); });
 	undo->setShortcut(QKeySequence::Undo);
 	undo->setEnabled(m_core->canUndo());
-	QAction *redo = menu->addAction(m_core->canRedo() ? "Redo " + m_core->redoLabel() : "Redo", this,
+	QAction *redo = menu->addAction(m_core->canRedo() ? L("Redo ") + m_core->redoLabel() : L("Redo"), this,
 					[this] { m_core->redo(); });
 	redo->setShortcut(QKeySequence("Ctrl+Y"));
 	redo->setEnabled(m_core->canRedo());
 	menu->addSeparator();
-	fillCollectionsMenu(menu->addMenu("Scene collections  (" + m_core->collection() + ")"));
-	fillProfilesMenu(menu->addMenu("Profiles  (" + m_core->profile() + ")"));
-	QMenu *import = menu->addMenu("Import");
-	import->addAction("From OBS Studio on this PC...", this, &MainWindow::importFromObs);
-	import->addAction("Overlay pack or scene collection (.json)...", this, &MainWindow::importCollection);
+	if (!easy) {
+		fillCollectionsMenu(menu->addMenu(L("Scene collections  (") + m_core->collection() + ")"));
+		fillProfilesMenu(menu->addMenu(L("Profiles  (") + m_core->profile() + ")"));
+	}
+	QMenu *import = menu->addMenu(L("Import"));
+	import->addAction(L("From OBS Studio on this PC..."), this, &MainWindow::importFromObs);
+	import->addAction(L("Overlay pack or scene collection (.json)..."), this, &MainWindow::importCollection);
 	menu->addSeparator();
-	QAction *studio = menu->addAction("Studio mode  (edit, then Go)", this,
+	if (easy) {
+		menu->addAction(L("Screenshot of what's on air"), this, [this] { screenshot(); });
+		menu->addAction(L("Mark moment  (chapter + saved replay)"), this, [this] { m_assist->mark(); });
+		menu->addAction(L("Open recordings folder"), this, [] {
+			const QString folder = Settings::get().value("record/folder", defaultFolder()).toString();
+			QDir().mkpath(folder);
+			QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+		});
+		menu->addSeparator();
+		menu->addAction(L("Run the setup again..."), this, &MainWindow::runSetup);
+		menu->addAction(L("Switch to Pro mode  (all the tools)"), this, [this] { setSimple(false); });
+		return;
+	}
+	QAction *studio = menu->addAction(L("Studio mode  (edit, then Go)"), this,
 					  [this] { m_core->setStudioMode(!m_core->studioMode()); });
 	studio->setCheckable(true);
 	studio->setChecked(m_core->studioMode());
-	QAction *vertical = menu->addAction("Vertical canvas  (Shorts, Reels, TikTok)", this, [this] {
+	QAction *vertical = menu->addAction(L("Vertical canvas  (Shorts, Reels, TikTok)"), this, [this] {
 		QString error;
 		if (!m_core->setVertical(!m_core->verticalOn(), &error))
 			say(error, true);
 	});
 	vertical->setCheckable(true);
 	vertical->setChecked(m_core->verticalOn());
-	fillProjectorMenu(menu->addMenu("Projector  (what's on air)"), nullptr);
-	QAction *vcam = menu->addAction("Virtual camera", this, &MainWindow::toggleVirtualCam);
+	fillProjectorMenu(menu->addMenu(L("Projector  (what's on air)")), nullptr);
+	QAction *vcam = menu->addAction(L("Virtual camera"), this, &MainWindow::toggleVirtualCam);
 	vcam->setCheckable(true);
 	vcam->setChecked(m_core->virtualCam());
-	menu->addAction("Screenshot of what's on air", this, [this] { screenshot(); });
-	menu->addAction("Mark moment  (chapter + saved replay)", this, [this] { m_assist->mark(); });
-	menu->addAction("Check my setup now", this, [this] {
+	menu->addAction(L("Screenshot of what's on air"), this, [this] { screenshot(); });
+	menu->addAction(L("Mark moment  (chapter + saved replay)"), this, [this] { m_assist->mark(); });
+	menu->addAction(L("Check my setup now"), this, [this] {
 		const QVector<Finding> found = m_assist->preflight(true);
 		if (found.isEmpty()) {
-			say("All good: scene, mic, disk and encoder look ready.");
+			say(L("All good: scene, mic, disk and encoder look ready."));
 			return;
 		}
 		QStringList lines;
 		for (const Finding &f : found)
 			lines << (f.level >= 2 ? "• " : "◦ ") + f.text;
-		QMessageBox::information(this, "Setup check", lines.join("\n"));
+		QMessageBox::information(this, L("Setup check"), lines.join("\n"));
 	});
 	menu->addSeparator();
-	menu->addAction("Stats", this, [this] {
+	menu->addAction(L("Stats"), this, [this] {
 		auto *dialog = new StatsDialog(m_core, this);
 		dialog->setAttribute(Qt::WA_DeleteOnClose);
 		dialog->show();
 	});
-	menu->addAction("Open recordings folder", this, [] {
+	menu->addAction(L("Open recordings folder"), this, [] {
 		const QString folder = Settings::get().value("record/folder", defaultFolder()).toString();
 		QDir().mkpath(folder);
 		QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
 	});
-	menu->addAction("Open log files", this,
+	menu->addAction(L("Open log files"), this,
 			[] { QDesktopServices::openUrl(QUrl::fromLocalFile(Settings::dataDir() + "/logs")); });
+	menu->addSeparator();
+	menu->addAction(L("Run the setup again..."), this, &MainWindow::runSetup);
+	menu->addAction(L("Switch to Simple mode  (fewer buttons)"), this, [this] { setSimple(true); });
+}
+
+// ---- Simple / Pro and the first-time setup
+bool MainWindow::simple()
+{
+	return Settings::get().value("ui/simple", false).toBool();
+}
+
+void MainWindow::setSimple(bool on)
+{
+	Settings::get().set("ui/simple", on);
+	if (on && m_core->studioMode())
+		m_core->setStudioMode(false);
+	applyLevel();
+	say(on ? L("Simple mode: just what you need to go live and record. Menu > Switch to Pro mode brings back "
+		 "every tool.")
+	       : L("Pro mode: every tool is shown."));
+}
+
+void MainWindow::applyLevel()
+{
+	const bool easy = simple();
+	for (QWidget *w : findChildren<QWidget *>())
+		if (w->property("pro").toBool())
+			w->setVisible(!easy);
+	if (m_mixer)
+		m_mixer->refresh(true);
+}
+
+void MainWindow::runSetup()
+{
+	m_modes->showAgain();
+	SetupWizard wizard(m_core, this);
+	if (wizard.exec() == QDialog::Accepted)
+		applySetup(wizard.choices());
+	else
+		Settings::get().set("setup/done", true); // skipped: not asked again (Menu has it)
+}
+
+void MainWindow::applySetup(const SetupChoices &c)
+{
+	Settings &s = Settings::get();
+	s.set("setup/done", true);
+	s.set("ui/simple", c.simple);
+	if (c.simple && m_core->studioMode())
+		m_core->setStudioMode(false);
+	bool channels = false;
+	if (!c.platform.isEmpty()) {
+		s.set("stream/platform", c.platform);
+		if (!c.server.isEmpty())
+			s.set("stream/server", c.server);
+		if (!c.key.isEmpty())
+			s.setSecret("stream/key", c.key);
+		if (!c.channel.isEmpty()) {
+			const char *key = c.platform == "twitch"    ? "events/twitchChannel"
+					  : c.platform == "youtube" ? "events/youtube"
+								    : "events/kickChannel";
+			channels = s.value(key).toString() != c.channel;
+			s.set(key, c.channel);
+		}
+	}
+	// back to front: the screen, then the game over it (a game window that isn't fullscreen leaves the screen
+	// showing), then the webcam in a corner, then the widgets
+	if (!c.screenId.isEmpty()) {
+		const auto screens = m_core->screens();
+		int number = 1;
+		for (int i = 0; i < screens.size(); ++i)
+			if (screens[i].second == c.screenId)
+				number = i + 1;
+		addScreen(c.screenId, screenLabel(number, c.screenLabel));
+	}
+	if (c.game)
+		addSource("game_capture");
+	if (!c.webcamId.isEmpty()) {
+		obs_data_t *cam = obs_data_create();
+		obs_data_set_string(cam, "video_device_id", c.webcamId.toUtf8().constData());
+		if (obs_source_t *source = m_core->addSource("dshow_input", L("Webcam"), cam, ObsCore::Fit::Corner))
+			m_core->fit(QString::fromUtf8(obs_source_get_name(source)), ObsCore::Fit::Corner);
+		obs_data_release(cam);
+	}
+	if (c.alerts)
+		addOverlay("alerts", true);
+	if (c.chat)
+		addOverlay("chat", true);
+	if (channels)
+		EventHub::get().restart();
+	applyLevel();
+	refreshSources();
+	say(c.platform.isEmpty() || !c.key.isEmpty()
+		    ? L("All set. Press Go Live when you're ready, or Record to try it out first.")
+		    : L("All set. Add your stream key when you press Go Live, or press Record to try it out first."));
+	if (c.importObs)
+		importFromObs();
 }
 
 void MainWindow::fillCollectionsMenu(QMenu *menu)
@@ -1483,27 +1673,27 @@ void MainWindow::fillCollectionsMenu(QMenu *menu)
 	menu->addSeparator();
 	auto create = [this](bool copy) {
 		bool ok = false;
-		const QString name = QInputDialog::getText(this, copy ? "Copy scene collection" : "New scene collection",
-							   "Name", QLineEdit::Normal,
-							   copy ? m_core->collection() + " copy" : QString(), &ok);
+		const QString name = QInputDialog::getText(this, copy ? L("Copy scene collection") : L("New scene collection"),
+							   L("Name"), QLineEdit::Normal,
+							   copy ? m_core->collection() + L(" copy") : QString(), &ok);
 		QString error;
 		if (ok && !m_core->newCollection(name, copy, &error))
 			say(error, true);
 	};
-	menu->addAction("New (empty)...", this, [create] { create(false); });
-	menu->addAction("Copy this one...", this, [create] { create(true); });
-	menu->addAction("Rename this one...", this, [this] {
+	menu->addAction(L("New (empty)..."), this, [create] { create(false); });
+	menu->addAction(L("Copy this one..."), this, [create] { create(true); });
+	menu->addAction(L("Rename this one..."), this, [this] {
 		bool ok = false;
 		const QString from = m_core->collection();
-		const QString to = QInputDialog::getText(this, "Rename scene collection", "Name", QLineEdit::Normal, from, &ok);
+		const QString to = QInputDialog::getText(this, L("Rename scene collection"), L("Name"), QLineEdit::Normal, from, &ok);
 		QString error;
 		if (ok && !m_core->renameCollection(from, to, &error))
 			say(error, true);
 	});
-	QAction *remove = menu->addAction("Remove this one...", this, [this] {
+	QAction *remove = menu->addAction(L("Remove this one..."), this, [this] {
 		const QString name = m_core->collection();
-		if (QMessageBox::question(this, "Remove scene collection",
-					  QString("Remove \"%1\" and all its scenes? This can't be undone.").arg(name),
+		if (QMessageBox::question(this, L("Remove scene collection"),
+					  QString(L("Remove \"%1\" and all its scenes? This can't be undone.")).arg(name),
 					  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 			return;
 		QString error;
@@ -1521,22 +1711,22 @@ void MainWindow::fillProfilesMenu(QMenu *menu)
 			if (!m_core->switchProfile(name, &error))
 				say(error, true);
 			else
-				say("Profile: " + name + ". Its stream key, quality and recording settings are in use.");
+				say(L("Profile: ") + name + L(". Its stream key, quality and recording settings are in use."));
 		});
 		a->setCheckable(true);
 		a->setChecked(name == m_core->profile());
 	}
 	menu->addSeparator();
-	menu->addAction("New profile...", this, [this] {
+	menu->addAction(L("New profile..."), this, [this] {
 		bool ok = false;
-		const QString name = QInputDialog::getText(this, "New profile",
-							   "Name (for example \"YouTube 1080p\" or \"Practice, record only\")",
+		const QString name = QInputDialog::getText(this, L("New profile"),
+							   L("Name (for example \"YouTube 1080p\" or \"Practice, record only\")"),
 							   QLineEdit::Normal, {}, &ok);
 		QString error;
 		if (ok && !m_core->newProfile(name, &error))
 			say(error, true);
 	});
-	QAction *remove = menu->addAction("Remove this profile", this, [this] {
+	QAction *remove = menu->addAction(L("Remove this profile"), this, [this] {
 		QString error;
 		if (!m_core->removeProfile(m_core->profile(), &error))
 			say(error, true);
@@ -1549,10 +1739,10 @@ void MainWindow::fillProjectorMenu(QMenu *menu, obs_source_t *source)
 	const QList<QScreen *> screens = QGuiApplication::screens();
 	for (int i = 0; i < screens.size(); i++) {
 		const QRect g = screens[i]->geometry();
-		menu->addAction(QString("Fullscreen on screen %1  (%2×%3)").arg(i + 1).arg(g.width()).arg(g.height()), this,
+		menu->addAction(QString(L("Fullscreen on screen %1  (%2×%3)")).arg(i + 1).arg(g.width()).arg(g.height()), this,
 				[this, source, i] { openProjector(source, i); });
 	}
-	menu->addAction("In a window", this, [this, source] { openProjector(source, -1); });
+	menu->addAction(L("In a window"), this, [this, source] { openProjector(source, -1); });
 }
 
 void MainWindow::openProjector(obs_source_t *source, int screen)
@@ -1560,7 +1750,7 @@ void MainWindow::openProjector(obs_source_t *source, int screen)
 	auto *projector = new ProjectorWindow(m_core, source, screen);
 	projector->setWindowIcon(windowIcon());
 	if (screen >= 0)
-		say("Projector open. Press Esc or double-click it to close.");
+		say(L("Projector open. Press Esc or double-click it to close."));
 }
 
 void MainWindow::screenshot(obs_source_t *source)
@@ -1577,11 +1767,11 @@ void MainWindow::sceneMenu(const QPoint &global)
 		return;
 	const QString name = row->data(Qt::UserRole).toString();
 	QMenu menu(this);
-	menu.addAction("Rename...", this, [this] { renameScene(); });
-	menu.addAction("Copy", this, [this, name] { m_core->duplicateScene(name); });
-	QMenu *own = menu.addMenu("Transition into this scene");
+	menu.addAction(L("Rename..."), this, [this] { renameScene(); });
+	menu.addAction(L("Copy"), this, [this, name] { m_core->duplicateScene(name); });
+	QMenu *own = menu.addMenu(L("Transition into this scene"));
 	const auto current = m_core->sceneTransition(name);
-	QAction *def = own->addAction("Use the default", this, [this, name] { m_core->setSceneTransition(name, {}, 0); });
+	QAction *def = own->addAction(L("Use the default"), this, [this, name] { m_core->setSceneTransition(name, {}, 0); });
 	def->setCheckable(true);
 	def->setChecked(current.first.isEmpty());
 	for (const auto &[id, label] : ObsCore::transitionKinds()) {
@@ -1589,7 +1779,7 @@ void MainWindow::sceneMenu(const QPoint &global)
 			bool ok = true;
 			int ms = m_core->transitionMs();
 			if (id != "cut_transition" && id != "obs_stinger_transition")
-				ms = QInputDialog::getInt(this, "Transition length", "Milliseconds", std::max(ms, 300), 50, 20000,
+				ms = QInputDialog::getInt(this, L("Transition length"), L("Milliseconds"), std::max(ms, 300), 50, 20000,
 							  50, &ok);
 			if (ok)
 				m_core->setSceneTransition(name, id, ms);
@@ -1599,16 +1789,16 @@ void MainWindow::sceneMenu(const QPoint &global)
 		a->setChecked(current.first == id);
 	}
 	obs_source_t *src = obs_get_source_by_name(name.toUtf8().constData());
-	fillProjectorMenu(menu.addMenu("Projector of this scene"), src);
-	menu.addAction("Screenshot of this scene", this, [this, src] { screenshot(src); });
+	fillProjectorMenu(menu.addMenu(L("Projector of this scene")), src);
+	menu.addAction(L("Screenshot of this scene"), this, [this, src] { screenshot(src); });
 	menu.addSeparator();
-	menu.addAction("Move up", this, [this, name] { m_core->moveScene(name, true); });
-	menu.addAction("Move down", this, [this, name] { m_core->moveScene(name, false); });
+	menu.addAction(L("Move up"), this, [this, name] { m_core->moveScene(name, true); });
+	menu.addAction(L("Move down"), this, [this, name] { m_core->moveScene(name, false); });
 	menu.addSeparator();
-	QAction *remove = menu.addAction("Remove", this, [this, name] {
-		if (QMessageBox::question(this, "Remove scene",
-					  QString("Remove the scene \"%1\"? Sources that only this scene uses go too. "
-						  "Ctrl+Z brings it back.")
+	QAction *remove = menu.addAction(L("Remove"), this, [this, name] {
+		if (QMessageBox::question(this, L("Remove scene"),
+					  QString(L("Remove the scene \"%1\"? Sources that only this scene uses go too. "
+						  "Ctrl+Z brings it back."))
 						  .arg(name)) == QMessageBox::Yes)
 			m_core->removeScene(name);
 	});
@@ -1622,12 +1812,12 @@ void MainWindow::chooseTransition()
 	// The stinger plays your own video over the cut; the scene switches at the moment you pick.
 	Settings &st = Settings::get();
 	QDialog dialog(this);
-	dialog.setWindowTitle("Stinger transition");
+	dialog.setWindowTitle(L("Stinger transition"));
 	auto *path = new QLineEdit(st.value("scenes/stingerPath").toString());
-	auto *browse = new QPushButton("Choose...");
+	auto *browse = new QPushButton(L("Choose..."));
 	connect(browse, &QPushButton::clicked, &dialog, [&dialog, path] {
-		const QString file = QFileDialog::getOpenFileName(&dialog, "Stinger video", path->text(),
-								  "Videos (*.webm *.mov *.mp4 *.mkv *.gif)");
+		const QString file = QFileDialog::getOpenFileName(&dialog, L("Stinger video"), path->text(),
+								  L("Videos (*.webm *.mov *.mp4 *.mkv *.gif)"));
 		if (!file.isEmpty())
 			path->setText(file);
 	});
@@ -1640,10 +1830,10 @@ void MainWindow::chooseTransition()
 	point->setSuffix(" ms");
 	point->setValue(st.value("scenes/stingerPoint", 500).toInt());
 	auto *form = new QFormLayout;
-	form->addRow("Video", row);
-	form->addRow("Switch scenes at", point);
-	auto *note = new QLabel("Use a video with a see-through background (.webm or .mov) so the scenes show around "
-				"it. Pick the moment the video covers the whole screen.");
+	form->addRow(L("Video"), row);
+	form->addRow(L("Switch scenes at"), point);
+	auto *note = new QLabel(L("Use a video with a see-through background (.webm or .mov) so the scenes show around "
+				"it. Pick the moment the video covers the whole screen."));
 	note->setObjectName("hint");
 	note->setWordWrap(true);
 	form->addRow("", note);
@@ -1662,7 +1852,7 @@ void MainWindow::chooseTransition()
 	st.set("scenes/stingerPath", path->text().trimmed());
 	st.set("scenes/stingerPoint", point->value());
 	m_core->setTransition("obs_stinger_transition", m_transitionMs->value());
-	say("Stinger set. It plays every time you switch scenes.");
+	say(L("Stinger set. It plays every time you switch scenes."));
 }
 
 void MainWindow::updateStudio()
@@ -1678,16 +1868,16 @@ void MainWindow::updateStudio()
 void MainWindow::importCollection()
 {
 	const QString file = QFileDialog::getOpenFileName(
-		this, "Import a scene collection", QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
-		"Scene collection (*.json)");
+		this, L("Import a scene collection"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
+		L("Scene collection (*.json)"));
 	if (file.isEmpty())
 		return;
 	QString folder;
-	if (QMessageBox::question(this, "Import",
-				  "Is the pack's pictures and videos folder somewhere else than next to this file? "
-				  "(Pick No if you unzipped the whole pack in one place.)",
+	if (QMessageBox::question(this, L("Import"),
+				  L("Is the pack's pictures and videos folder somewhere else than next to this file? "
+				  "(Pick No if you unzipped the whole pack in one place.)"),
 				  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes)
-		folder = QFileDialog::getExistingDirectory(this, "The pack's folder", QFileInfo(file).absolutePath());
+		folder = QFileDialog::getExistingDirectory(this, L("The pack's folder"), QFileInfo(file).absolutePath());
 	QStringList notes;
 	QString error;
 	const QString name = m_core->importCollection(file, folder, &notes, &error);
@@ -1695,7 +1885,7 @@ void MainWindow::importCollection()
 		say(error, true);
 		return;
 	}
-	QMessageBox::information(this, "Imported \"" + name + "\"", notes.join("\n\n"));
+	QMessageBox::information(this, L("Imported \"") + name + "\"", notes.join("\n\n"));
 }
 
 void MainWindow::importFromObs()
@@ -1704,17 +1894,17 @@ void MainWindow::importFromObs()
 	const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/obs-studio/basic/scenes";
 	const QFileInfoList files = QDir(dir).entryInfoList({"*.json"}, QDir::Files, QDir::Time);
 	if (files.isEmpty()) {
-		QMessageBox::information(this, "Import from OBS Studio",
-					 "No OBS Studio scene collections were found on this PC. If you have a .json file "
-					 "from OBS, use Import > Overlay pack or scene collection.");
+		QMessageBox::information(this, L("Import from OBS Studio"),
+					 L("No OBS Studio scene collections were found on this PC. If you have a .json file "
+					 "from OBS, use Import > Overlay pack or scene collection."));
 		return;
 	}
 	QStringList names;
 	for (const QFileInfo &f : files)
 		names << f.completeBaseName();
 	bool ok = false;
-	const QString pick = QInputDialog::getItem(this, "Import from OBS Studio",
-						   "Which scene collection? (OBS itself is not changed.)", names, 0, false, &ok);
+	const QString pick = QInputDialog::getItem(this, L("Import from OBS Studio"),
+						   L("Which scene collection? (OBS itself is not changed.)"), names, 0, false, &ok);
 	if (!ok)
 		return;
 	QStringList notes;
@@ -1724,7 +1914,7 @@ void MainWindow::importFromObs()
 		say(error, true);
 		return;
 	}
-	QMessageBox::information(this, "Imported \"" + name + "\"", notes.join("\n\n"));
+	QMessageBox::information(this, L("Imported \"") + name + "\"", notes.join("\n\n"));
 }
 
 // ---- dialogs
@@ -1748,11 +1938,11 @@ void MainWindow::openAudio(obs_source_t *source)
 void MainWindow::togglePause()
 {
 	if (!m_core->recording()) {
-		say("Pause works while recording.");
+		say(L("Pause works while recording."));
 		return;
 	}
 	if (!m_core->pauseRecording(!m_core->recordingPaused()))
-		say("This recording can't be paused. MP4 and MKV recordings can.", true);
+		say(L("This recording can't be paused. MP4 and MKV recordings can."), true);
 }
 
 void MainWindow::toggleVirtualCam()
@@ -1762,19 +1952,19 @@ void MainWindow::toggleVirtualCam()
 		return;
 	}
 	if (!ObsCore::virtualCamInstalled() &&
-	    QMessageBox::question(this, "Virtual camera",
-				  "The first time, Windows asks for permission to add the virtual camera (one Yes, then "
-				  "it stays). Continue?") != QMessageBox::Yes) {
+	    QMessageBox::question(this, L("Virtual camera"),
+				  L("The first time, Windows asks for permission to add the virtual camera (one Yes, then "
+				  "it stays). Continue?")) != QMessageBox::Yes) {
 		updateButtons();
 		return;
 	}
 	QString error;
 	if (!m_core->startVirtualCam(&error))
-		say("Virtual camera: " + error, true);
+		say(L("Virtual camera: ") + error, true);
 	updateButtons();
 }
 
-void MainWindow::addOverlay(const QString &kind)
+void MainWindow::addOverlay(const QString &kind, bool quiet)
 {
 	// sizes and places that suit each widget on the canvas; everything can be moved like any source
 	const QSize canvas = m_core->canvas();
@@ -1805,18 +1995,20 @@ void MainWindow::addOverlay(const QString &kind)
 	obs_source_t *source = m_core->addSourceAt("zunimi_overlay", p.name, s, p.box);
 	obs_data_release(s);
 	if (!source) {
-		say("That widget could not be added.", true);
+		say(L("That widget could not be added."), true);
 		return;
 	}
 	const QString name = QString::fromUtf8(obs_source_get_name(source));
 	selectSource(name);
+	if (quiet)
+		return;
 	if (kind == "alerts") {
-		say("Alert box added. Design it here, then press Test to see it on stream.");
+		say(L("Alert box added. Design it here, then press Test to see it on stream."));
 		overlays::Engine::get().openDesigner(source);
 	} else if (kind == "chat" || kind == "goal" || kind == "label" || kind == "events") {
 		const QStringList services = EventHub::get().services();
 		if (std::none_of(services.begin(), services.end(), [](const QString &k) { return EventHub::get().connected(k); }))
-			say("Added. Connect your channels in Settings > Connections so it fills in.");
+			say(L("Added. Connect your channels in Settings > Connections so it fills in."));
 		openProperties(name);
 	} else {
 		openProperties(name);
@@ -1832,13 +2024,13 @@ bool MainWindow::preflightOk()
 	if (found.isEmpty())
 		return true;
 	QDialog dialog(this);
-	dialog.setWindowTitle("Before you go live");
+	dialog.setWindowTitle(L("Before you go live"));
 	auto *layout = new QVBoxLayout(&dialog);
 	layout->setContentsMargins(18, 18, 18, 18);
 	layout->setSpacing(10);
 	for (const Finding &f : found) {
 		auto *row = new QHBoxLayout;
-		auto *text = new QLabel((f.level >= 2 ? "<b style='color:#FF4D6D'>●</b>  " : "<b style='color:#FFB020'>●</b>  ") +
+		auto *text = new QLabel((f.level >= 2 ? L("<b style='color:#FF4D6D'>●</b>  ") : L("<b style='color:#FFB020'>●</b>  ")) +
 					f.text.toHtmlEscaped());
 		text->setWordWrap(true);
 		row->addWidget(text, 1);
@@ -1847,16 +2039,16 @@ bool MainWindow::preflightOk()
 			connect(fixButton, &QPushButton::clicked, &dialog, [this, fixButton, id = f.fix] {
 				m_assist->applyFix(id);
 				fixButton->setEnabled(false);
-				fixButton->setText("Fixed");
+				fixButton->setText(L("Fixed"));
 			});
 			row->addWidget(fixButton);
 		}
 		layout->addLayout(row);
 	}
-	auto *never = new QCheckBox("Don't check before going live");
+	auto *never = new QCheckBox(L("Don't check before going live"));
 	layout->addWidget(never);
 	auto *buttons = new QDialogButtonBox;
-	QPushButton *go = buttons->addButton("Go live anyway", QDialogButtonBox::AcceptRole);
+	QPushButton *go = buttons->addButton(L("Go live anyway"), QDialogButtonBox::AcceptRole);
 	go->setObjectName("primary");
 	buttons->addButton(QDialogButtonBox::Cancel);
 	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -1881,17 +2073,17 @@ bool MainWindow::ensureBrowser()
 	if (m_core->moduleLoaded("obs-browser"))
 		return true;
 	if (!Addons::browserInstalled()) {
-		say("The browser source is missing from this copy of Zunimi Studio. Installing the latest version brings it back.", true);
+		say(L("The browser source is missing from this copy of Zunimi Studio. Installing the latest version brings it back."), true);
 		return false;
 	}
 	Addons::setBrowserEnabled(true);
-	if (QMessageBox::question(this, "Browser source",
-				  "Web pages and StreamElements/Streamlabs overlays use the browser source. It starts the first "
+	if (QMessageBox::question(this, L("Browser source"),
+				  L("Web pages and StreamElements/Streamlabs overlays use the browser source. It starts the first "
 				  "time you use it, so Zunimi Studio needs a quick restart. "
-				  "Restart now?") != QMessageBox::Yes)
+				  "Restart now?")) != QMessageBox::Yes)
 		return false;
 	if (!quitWouldStop().isEmpty()) {
-		say("Finish your stream or recording first: starting the browser source needs a restart.", true);
+		say(L("Finish your stream or recording first: starting the browser source needs a restart."), true);
 		return false;
 	}
 	restartApp();
@@ -1904,15 +2096,15 @@ void MainWindow::addBrowser(bool overlayLink)
 		return;
 	bool ok = false;
 	const QString url = QInputDialog::getText(
-		this, overlayLink ? "Overlay or widget link" : "Web page",
-		overlayLink ? "Paste the overlay or widget link from StreamElements or Streamlabs\n"
-			      "(StreamElements: Overlays > your overlay > Copy URL. Streamlabs: the widget's URL):"
-			    : "Address of the page:",
+		this, overlayLink ? L("Overlay or widget link") : L("Web page"),
+		overlayLink ? L("Paste the overlay or widget link from StreamElements or Streamlabs\n"
+			      "(StreamElements: Overlays > your overlay > Copy URL. Streamlabs: the widget's URL):")
+			    : L("Address of the page:"),
 		QLineEdit::Normal, {}, &ok).trimmed();
 	if (!ok || url.isEmpty())
 		return;
 	if (!url.startsWith("https://") && !url.startsWith("http://") && !url.startsWith("file:///")) {
-		say("That doesn't look like a web address (it should start with https://).", true);
+		say(L("That doesn't look like a web address (it should start with https://)."), true);
 		return;
 	}
 	const QSize canvas = m_core->canvas();
@@ -1927,18 +2119,18 @@ void MainWindow::addBrowser(bool overlayLink)
 	obs_data_set_int(s, "height", overlayLink ? 1080 : 720);
 	obs_data_set_bool(s, "shutdown", true);        // a hidden browser source stops using CPU
 	obs_data_set_bool(s, "reroute_audio", true);   // its sound (alert sounds) goes through the mixer
-	QString name = overlayLink ? (url.contains("streamelements") ? "StreamElements overlay" : url.contains("streamlabs") ? "Streamlabs widget" : "Overlay")
+	QString name = overlayLink ? (url.contains("streamelements") ? L("StreamElements overlay") : url.contains("streamlabs") ? L("Streamlabs widget") : L("Overlay"))
 				   : QUrl(url).host();
 	obs_source_t *source = overlayLink ? m_core->addSourceAt("browser_source", name, s, QRectF(0, 0, canvas.width(), canvas.height()))
-					   : m_core->addSource("browser_source", name.isEmpty() ? "Web page" : name, s, ObsCore::Fit::Fill);
+					   : m_core->addSource("browser_source", name.isEmpty() ? L("Web page") : name, s, ObsCore::Fit::Fill);
 	obs_data_release(s);
 	if (!source) {
-		say("The browser source could not be added.", true);
+		say(L("The browser source could not be added."), true);
 		return;
 	}
 	selectSource(QString::fromUtf8(obs_source_get_name(source)));
-	say(overlayLink ? "Overlay added over the whole screen. Its alerts and widgets appear when they're triggered."
-			: "Page added. Right-click it for Options (size, custom CSS, refresh).");
+	say(overlayLink ? L("Overlay added over the whole screen. Its alerts and widgets appear when they're triggered.")
+			: L("Page added. Right-click it for Options (size, custom CSS, refresh)."));
 }
 
 void MainWindow::updateCanvasSwitch()
@@ -1956,34 +2148,34 @@ void MainWindow::verticalSettings()
 {
 	Settings &st = Settings::get();
 	QDialog dialog(this);
-	dialog.setWindowTitle("Vertical canvas");
+	dialog.setWindowTitle(L("Vertical canvas"));
 	auto *size = new QComboBox;
-	size->addItem("1080 x 1920 (sharp)", "1080");
-	size->addItem("720 x 1280 (lighter)", "720");
+	size->addItem(L("1080 x 1920 (sharp)"), "1080");
+	size->addItem(L("720 x 1280 (lighter)"), "720");
 	size->setCurrentIndex(m_core->verticalSize().width() == 720 ? 1 : 0);
-	auto *record = new QCheckBox("Record it too, next to every recording");
+	auto *record = new QCheckBox(L("Record it too, next to every recording"));
 	record->setChecked(st.value("vertical/record", true).toBool());
-	auto *stream = new QCheckBox("Stream it too, while you're live");
+	auto *stream = new QCheckBox(L("Stream it too, while you're live"));
 	stream->setChecked(st.value("vertical/stream", false).toBool());
 	auto *server = new QLineEdit(st.value("vertical/server").toString());
 	server->setPlaceholderText("rtmp://... (YouTube: rtmps://a.rtmps.youtube.com:443/live2)");
 	auto *key = new QLineEdit(st.secret("vertical/key"));
 	key->setEchoMode(QLineEdit::Password);
-	key->setPlaceholderText("Stream key for the vertical stream");
+	key->setPlaceholderText(L("Stream key for the vertical stream"));
 	auto *bitrate = new QSpinBox;
 	bitrate->setRange(1000, 20000);
 	bitrate->setSingleStep(500);
 	bitrate->setSuffix(" kbps");
 	bitrate->setValue(st.value("vertical/bitrate", std::max(2500, m_core->plan().bitrate * 3 / 4)).toInt());
 	auto *form = new QFormLayout;
-	form->addRow("Size", size);
+	form->addRow(L("Size"), size);
 	form->addRow("", record);
 	form->addRow("", stream);
-	form->addRow("Server", server);
-	form->addRow("Stream key", key);
-	form->addRow("Bitrate", bitrate);
-	auto *note = new QLabel("The vertical picture is encoded separately, so it costs a second encode (easy for a "
-				"graphics card encoder, heavy for x264). YouTube takes vertical live streams as Shorts.");
+	form->addRow(L("Server"), server);
+	form->addRow(L("Stream key"), key);
+	form->addRow(L("Bitrate"), bitrate);
+	auto *note = new QLabel(L("The vertical picture is encoded separately, so it costs a second encode (easy for a "
+				"graphics card encoder, heavy for x264). YouTube takes vertical live streams as Shorts."));
 	note->setObjectName("hint");
 	note->setWordWrap(true);
 	form->addRow("", note);
@@ -2006,5 +2198,5 @@ void MainWindow::verticalSettings()
 	st.set("vertical/bitrate", bitrate->value());
 	m_core->outputSettingsChanged();
 	if (resized)
-		say("The new vertical size applies after a restart of Zunimi Studio.");
+		say(L("The new vertical size applies after a restart of Zunimi Studio."));
 }

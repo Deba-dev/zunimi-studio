@@ -1,4 +1,5 @@
 #include "ui/PreviewWidget.h"
+#include "core/I18n.h"
 
 #include "core/ObsCore.h"
 
@@ -305,7 +306,7 @@ void PreviewWidget::mousePressEvent(QMouseEvent *event)
 	const int corner = event->button() == Qt::LeftButton ? cornerAt(pos) : -1;
 	if (corner >= 0) {
 		const bool crop = event->modifiers() & Qt::AltModifier;
-		m_core->beginEdit(crop ? "Crop" : "Resize");
+		m_core->beginEdit(crop ? L("Crop") : L("Resize"));
 		m_drag = crop ? Drag::Crop : Drag::Resize;
 		m_corner = corner;
 		m_startBox = m_core->itemBox(m_selected);
@@ -315,7 +316,7 @@ void PreviewWidget::mousePressEvent(QMouseEvent *event)
 	obs_sceneitem_t *hit = itemAt(pos);
 	setSelected(hit, true);
 	if (hit && event->button() == Qt::LeftButton && !obs_sceneitem_locked(hit)) {
-		m_core->beginEdit("Move");
+		m_core->beginEdit(L("Move"));
 		vec2 p{};
 		obs_sceneitem_get_pos(hit, &p);
 		m_startPos = QPointF(p.x, p.y);
@@ -461,7 +462,7 @@ void PreviewWidget::keyPressEvent(QKeyEvent *event)
 		return;
 	}
 	if (!m_nudging) { // one undo step for a whole run of nudges
-		m_core->beginEdit("Nudge");
+		m_core->beginEdit(L("Nudge"));
 		m_nudging = true;
 	}
 	vec2 p{};

@@ -3,5 +3,7 @@
     <file>logo-32.png</file>
     <file>logo-64.png</file>
     <file>logo-256.png</file>
+    <file>remote.html</file>
+    <file>i18n/hi.json</file>
   </qresource>
 </RCC>

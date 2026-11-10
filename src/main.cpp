@@ -3,14 +3,20 @@
 #include "core/ObsCore.h"
 #include "core/Settings.h"
 #include "core/Updater.h"
+#include "core/I18n.h"
 #include "events/Events.h"
 #include "overlays/Overlays.h"
 #include "ui/AlertDesigner.h"
 #include "ui/FiltersDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/PropertiesView.h"
+#include "ui/SettingsDialog.h"
+#include "ui/SetupWizard.h"
+#include "ui/Templates.h"
+#include <QPushButton>
 #include "ui/Theme.h"
 #include "ui/WindowModes.h"
+#include "net/WebSocket.h"
 #include "version.h"
 
 #include <QApplication>
@@ -21,6 +27,14 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QCryptographicHash>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QUrl>
+#include <QUuid>
+#include <QUrlQuery>
+#include <memory>
 #include <QIcon>
 #include <QLockFile>
 #include <QMessageBox>
@@ -135,7 +149,7 @@ int main(int argc, char *argv[])
 	app.setApplicationVersion(ZUNIMI_VERSION);
 	app.setQuitOnLastWindowClosed(false); // hiding to the tray must not end the app
 	app.setStyle("Fusion");
-	app.setStyleSheet(Theme::styleSheet());
+	Theme::apply(); // the colours and accent, as on zunimilabs.online
 	QIcon icon;
 	for (int size : {32, 64, 256})
 		icon.addFile(QString(":/logo-%1.png").arg(size), QSize(size, size));
@@ -150,6 +164,8 @@ int main(int argc, char *argv[])
 	}
 
 	openLog();
+	i18n::load();
+	i18n::installQtTranslator();
 	SetUnhandledExceptionFilter(onCrash);
 	blog(LOG_INFO, "%s %s starting", ZUNIMI_NAME, ZUNIMI_VERSION);
 	int code = 0;
@@ -456,10 +472,11 @@ int main(int argc, char *argv[])
 				auto has = [](const QVector<Finding> &f, const QString &word) {
 					return std::any_of(f.begin(), f.end(), [&word](const Finding &x) { return x.text.contains(word); });
 				};
-				check(has(assist->preflight(true), "empty"), "pre-flight: an empty scene is caught");
+				check(has(assist->preflight(true), L("This scene is empty: viewers would see a black screen.")),
+				      "pre-flight: an empty scene is caught");
 				obs_source_set_muted(core.microphone(), true);
 				QVector<Finding> f = assist->preflight(true);
-				check(has(f, "muted"), "pre-flight: a muted mic is caught");
+				check(has(f, L("Your mic is muted.")), "pre-flight: a muted mic is caught");
 				assist->applyFix("unmute_mic");
 				check(!obs_source_muted(core.microphone()), "fix: unmute the mic");
 				core.addSource("color_source", "Colour", nullptr, ObsCore::Fit::Fill);
@@ -486,7 +503,7 @@ int main(int argc, char *argv[])
 				QTimer::singleShot(300, [file, check, &window] {
 					QFile chapters(QFileInfo(file).dir().filePath(QFileInfo(file).completeBaseName() + " chapters.txt"));
 					const QString text = chapters.open(QIODevice::ReadOnly) ? QString::fromUtf8(chapters.readAll()) : QString();
-					check(text.startsWith("00:00 Start") && text.contains("First") && text.contains("Moment 2"),
+					check(text.startsWith("00:00 Start") && text.contains("First") && text.contains(QString(L("Moment %1")).arg(2)),
 					      "mark moment writes chapters: " + text.simplified());
 					check(QFile::exists(Settings::dataDir() + "/moments.jsonl"), "moments log for Clip Studio");
 					blog(LOG_INFO, "selftest assist: done");
@@ -575,6 +592,256 @@ int main(int argc, char *argv[])
 				});
 			});
 		}
+		if (app.arguments().contains("--selftest-relay")) {
+			// Against a relay at ZUNIMI_RELAY_URL started with DEV=1 (zunimilabs-site/relay: npx wrangler dev): gets a
+			// channel, connects, receives a Ko-fi tip sent to its webhook link, learns its Kick link, parses Kicks.
+			auto passed = std::make_shared<QStringList>();
+			auto check = [passed, &window](bool ok, const QString &what) {
+				blog(ok ? LOG_INFO : LOG_ERROR, "selftest relay: %s %s", ok ? "ok  " : "FAIL", what.toUtf8().constData());
+				if (ok && !passed->contains(what))
+					passed->append(what);
+				if (passed->size() == 5) {
+					blog(LOG_INFO, "selftest relay: all passed");
+					QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
+				}
+			};
+			QTimer::singleShot(20000, &app, [passed, &window] {
+				if (passed->size() < 5) {
+					blog(LOG_ERROR, "selftest relay: MISSING (only %s)", passed->join(", ").toUtf8().constData());
+					window.modes()->quit(false);
+				}
+			});
+			StreamEvent kicks;
+			check(RelayEvents::parse(QJsonObject{{"kind", "bits"}, {"platform", "kick"}, {"user", "kicker"}, {"amount", 500},
+							     {"currency", "KICKS"}},
+						 &kicks) &&
+				      kicks.amountText() == QString(L("%1 Kicks")).arg(500),
+			      "Kicks read as Kicks");
+			Settings::get().setSecret("events/kofiToken", "kofi-app-token");
+			QObject::connect(&EventHub::get(), &EventHub::event, &app, [check](const StreamEvent &e) {
+				if (e.platform == "kofi")
+					check(e.type == "tip" && e.user == "Meera" && e.amount == 3 && e.currency == "USD", "Ko-fi tip arrived");
+			});
+			auto sentTip = std::make_shared<bool>(false);
+			QObject::connect(&EventHub::get(), &EventHub::statusChanged, &app, [check, sentTip](const QString &service) {
+				if (service != "relay" || !EventHub::get().connected("relay"))
+					return;
+				const QString status = EventHub::get().status("relay");
+				if (status.contains("selftest_kick"))
+					check(true, "the Kick link is known");
+				// the first "ready" comes before the relay has read the app's Ko-fi token; the second says Ko-fi
+				if (*sentTip || !status.contains(L("Ko-fi tips")))
+					return;
+				*sentTip = true;
+				check(true, "connected with Ko-fi on");
+				QUrlQuery form;
+				form.addQueryItem("data", QString::fromUtf8(QJsonDocument(QJsonObject{
+					{"verification_token", "kofi-app-token"}, {"message_id", QUuid::createUuid().toString()},
+					{"type", "Donation"}, {"is_public", true}, {"from_name", "Meera"}, {"message", "chai pe"},
+					{"amount", "3.00"}, {"currency", "USD"}}).toJson(QJsonDocument::Compact)));
+				QNetworkRequest req{QUrl(RelayEvents::kofiLink())};
+				req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+				QNetworkReply *r = EventHub::get().network()->post(req, form.toString(QUrl::FullyEncoded).toUtf8());
+				QObject::connect(r, &QNetworkReply::finished, r, &QObject::deleteLater);
+				QNetworkRequest link{QUrl(RelayEvents::base() + "/v1/dev/kick-link")};
+				link.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+				QNetworkReply *k = EventHub::get().network()->post(link, QJsonDocument(QJsonObject{
+					{"uid", "777"}, {"id", Settings::get().value("relay/id").toString()}, {"name", "selftest_kick"}}).toJson());
+				QObject::connect(k, &QNetworkReply::finished, k, &QObject::deleteLater);
+			});
+			RelayEvents::ensureChannel([check](const QString &error) {
+				check(error.isEmpty() && RelayEvents::kofiLink().contains("/v1/kofi/"), "a relay channel is made");
+				EventHub::get().restart();
+			});
+		}
+		if (app.arguments().contains("--demo-template")) {
+			// --demo-template <kind> <style>: adds that template, then saves what's on air to <ZUNIMI_DATA>/selftest.
+			const int at = app.arguments().indexOf("--demo-template");
+			const QString kind = app.arguments().value(at + 1, "starting"), style = app.arguments().value(at + 2, "neon");
+			QTimer::singleShot(1200, &app, [&core, kind, style] {
+				QString error;
+				templates::apply(&core, kind, style, &error);
+				QTimer::singleShot(3500, &core, [&core] { core.screenshot(Settings::dataDir() + "/selftest"); });
+			});
+		}
+		if (app.arguments().contains("--selftest-templates")) {
+			// Adds every template in every style, checks what each scene holds, and writes the previews and the
+			// full-size pictures to <ZUNIMI_DATA>/selftest for a look.
+			QTimer::singleShot(1200, &app, [&core, &window] {
+				bool all = true;
+				auto check = [&all](bool ok, const QString &what) {
+					all &= ok;
+					blog(ok ? LOG_INFO : LOG_ERROR, "selftest templates: %s %s", ok ? "ok  " : "FAIL", what.toUtf8().constData());
+				};
+				QDir().mkpath(Settings::dataDir() + "/selftest");
+				const QHash<QString, QStringList> wanted = {
+					{"starting", {"image_source", "text_gdiplus", "zunimi_overlay"}},
+					{"brb", {"image_source", "text_gdiplus", "zunimi_overlay"}},
+					{"ending", {"image_source", "text_gdiplus", "zunimi_overlay"}},
+					{"gaming", {"game_capture", "image_source", "zunimi_overlay"}},
+					{"chatting", {"image_source", "zunimi_overlay"}}};
+				for (const templates::Style &st : templates::styles())
+					for (const templates::Kind &k : templates::kinds()) {
+						templates::preview(k.id, st.id, QSize(640, 360))
+							.save(Settings::dataDir() + "/selftest/preview-" + st.id + "-" + k.id + ".png");
+						QString error;
+						const QString scene = templates::apply(&core, k.id, st.id, &error);
+						QStringList kinds;
+						for (const SceneItem &i : core.items())
+							kinds << i.kind;
+						bool has = !scene.isEmpty() && core.currentScene() == scene;
+						for (const QString &w : wanted.value(k.id))
+							has &= kinds.contains(w);
+						check(has, QString("%1 / %2 -> \"%3\" [%4] %5").arg(st.id, k.id, scene, kinds.join(","), error));
+						// items() is top first: the camera must sit over a background, and the Gaming frame over the game
+						if (k.id == "chatting" && kinds.contains("dshow_input"))
+							check(kinds.indexOf("dshow_input") < kinds.indexOf("image_source"), "the webcam is over the background");
+						if (k.id == "gaming")
+							check(kinds.indexOf("image_source") < kinds.indexOf("game_capture"), "the frame is over the game");
+					}
+				check(QDir(Settings::dataDir() + "/templates").entryList({"*.png"}).size() == 15, "15 pictures drawn");
+				core.undo();
+				check(core.scenes().size() == 16, "undo takes back the last template's sources, scenes stay");
+				blog(LOG_INFO, "selftest templates: %s", all ? "all passed" : "SOME FAILED");
+				QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
+			});
+		}
+		if (app.arguments().contains("--selftest-groups")) {
+			// Groups: two of three sources go in a group, the list shows the group then its sources, a source inside
+			// can be hidden, ungroup and undo/redo work.
+			QTimer::singleShot(1200, &app, [&core, &window] {
+				bool all = true;
+				auto check = [&all](bool ok, const QString &what) {
+					all &= ok;
+					blog(ok ? LOG_INFO : LOG_ERROR, "selftest groups: %s %s", ok ? "ok  " : "FAIL", what.toUtf8().constData());
+				};
+				for (const char *n : {"A", "B", "C"})
+					core.addSource("color_source_v3", n, nullptr, ObsCore::Fit::Fill);
+				auto names = [&core] {
+					QStringList out;
+					for (const SceneItem &i : core.items())
+						out << (i.isGroup ? "[" + i.name + "]" : i.group.isEmpty() ? i.name : i.group + "/" + i.name);
+					return out.join(" ");
+				};
+				const QString g = core.groupItems({"A", "B"}, "Pair");
+				check(g == "Pair", "group made");
+				const QString order = names();
+				check(order == "[Pair] Pair/B Pair/A C" || order == "C [Pair] Pair/B Pair/A", "list shows the group then its sources: " + order);
+				core.setVisible("A", false);
+				obs_sceneitem_t *a = core.item("A");
+				check(a && !obs_sceneitem_visible(a), "a source inside the group can be hidden");
+				check(core.ungroup("Pair") && !names().contains("Pair"), "ungroup: " + names());
+				core.undo();
+				check(names().contains("[Pair]"), "undo brings the group back: " + names());
+				core.redo();
+				check(!names().contains("Pair"), "redo ungroups again: " + names());
+				blog(LOG_INFO, "selftest groups: %s", all ? "all passed" : "SOME FAILED");
+				QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
+			});
+		}
+		if (app.arguments().contains("--selftest-pack")) {
+			// --selftest-pack <zip> <sha256>: installs a template pack from a file, as if it came from the catalog.
+			const int at = app.arguments().indexOf("--selftest-pack");
+			const QString zipPath = app.arguments().value(at + 1), sha = app.arguments().value(at + 2);
+			QTimer::singleShot(1200, &app, [&core, &window, zipPath, sha] {
+				QFile f(zipPath);
+				const QByteArray zip = f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+				QString message;
+				const bool refused = templates::installPack(&core, "test-pack", zip, QString(64, '0'), &message).isEmpty();
+				blog(refused ? LOG_INFO : LOG_ERROR, "selftest pack: %s a wrong checksum is refused", refused ? "ok  " : "FAIL");
+				const QString name = templates::installPack(&core, "test-pack", zip, sha, &message);
+				const bool ok = !name.isEmpty() && core.collections().contains(name);
+				blog(ok ? LOG_INFO : LOG_ERROR, "selftest pack: %s installed as \"%s\": %s", ok ? "ok  " : "FAIL",
+				     name.toUtf8().constData(), message.toUtf8().constData());
+				QString error;
+				const bool switched = ok && core.switchCollection(name, &error) && core.scenes().size() >= 2;
+				blog(switched ? LOG_INFO : LOG_ERROR, "selftest pack: %s switched to it: %s", switched ? "ok  " : "FAIL",
+				     core.scenes().join(", ").toUtf8().constData());
+				blog(LOG_INFO, "selftest pack: %s", refused && ok && switched ? "all passed" : "SOME FAILED");
+				QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
+			});
+		}
+		if (app.arguments().contains("--selftest-setup")) {
+			// Carries out a first-time setup (Simple mode, Twitch, screen, alerts, chat) and checks the result.
+			QTimer::singleShot(1200, &app, [&core, &window] {
+				SetupChoices c;
+				c.simple = true;
+				c.platform = "twitch";
+				c.server = "rtmp://live.twitch.tv/app";
+				c.key = "live_selftest";
+				c.channel = "zunimi_selftest";
+				const auto screens = core.screens();
+				if (!screens.isEmpty()) {
+					c.screenId = screens.first().second;
+					c.screenLabel = screens.first().first;
+				}
+				c.game = true;
+				c.alerts = c.chat = true;
+				window.applySetup(c);
+				auto check = [](bool ok, const char *what) {
+					blog(ok ? LOG_INFO : LOG_ERROR, "selftest setup: %s %s", what, ok ? "ok" : "FAILED");
+					return ok;
+				};
+				Settings &s = Settings::get();
+				bool all = check(s.value("ui/simple").toBool() && s.value("setup/done").toBool(), "saved as Simple and done");
+				all &= check(s.secret("stream/key") == "live_selftest" && s.value("stream/platform") == "twitch", "stream key");
+				all &= check(s.value("events/twitchChannel") == "zunimi_selftest", "channel");
+				QStringList kinds;
+				for (const SceneItem &i : core.items())
+					kinds << i.kind;
+				blog(LOG_INFO, "selftest setup: sources %s", kinds.join(", ").toUtf8().constData());
+				all &= check(kinds.contains("monitor_capture") && kinds.contains("game_capture") &&
+						     kinds.count("zunimi_overlay") == 2,
+					     "screen, game, alerts and chat added");
+				int shown = 0, pro = 0;
+				for (QWidget *w : window.findChildren<QWidget *>())
+					if (w->property("pro").toBool()) {
+						++pro;
+						shown += !w->isHidden();
+					}
+				all &= check(pro >= 5 && shown == 0, "Pro tools hidden");
+				window.setSimple(false);
+				shown = 0;
+				for (QWidget *w : window.findChildren<QWidget *>())
+					if (w->property("pro").toBool())
+						shown += !w->isHidden();
+				all &= check(shown == pro, "Pro mode shows them again");
+				blog(LOG_INFO, "selftest setup: %s", all ? "all passed" : "SOME FAILED");
+				QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
+			});
+		}
+		if (app.arguments().contains("--demo-setup")) {
+			// Opens the first-time setup on the page given after it (1-4), for screenshots.
+			const int at = app.arguments().indexOf("--demo-setup");
+			const int pageNo = std::max(1, app.arguments().value(at + 1).toInt());
+			QTimer::singleShot(800, &app, [&core, &window, pageNo] {
+				auto *wizard = new SetupWizard(&core, &window);
+				wizard->setAttribute(Qt::WA_DeleteOnClose);
+				wizard->show();
+				for (int i = 1; i < pageNo; ++i)
+					for (QPushButton *b : wizard->findChildren<QPushButton *>())
+						if (b->text() == "Next") {
+							b->click();
+							break;
+						}
+			});
+		}
+		if (app.arguments().contains("--demo-settings")) {
+			// Opens Settings on the tab named after it (default Remote), for screenshots and UI checks.
+			const int at = app.arguments().indexOf("--demo-settings");
+			const int tab = app.arguments().value(at + 1).toInt(nullptr) ? app.arguments().value(at + 1).toInt()
+										  : int(SettingsDialog::Remote);
+			if (tab == int(SettingsDialog::Remote) && app.arguments().contains("--remote-on")) {
+				Settings::get().set("remote/on", true);
+				Settings::get().set("remote/lan", true);
+			}
+			QTimer::singleShot(800, &app, [&core, &window, tab] {
+				auto *dialog = new SettingsDialog(&core, window.modes(), &window);
+				dialog->setAttribute(Qt::WA_DeleteOnClose);
+				dialog->openTab(SettingsDialog::Tab(tab));
+				dialog->show();
+			});
+		}
 		if (app.arguments().contains("--demo-dialogs")) {
 			// Opens a source's options and the mic's filters side by side, for screenshots and UI checks.
 			QTimer::singleShot(800, &app, [&core, &window] {
@@ -593,6 +860,121 @@ int main(int argc, char *argv[])
 				designer->setAttribute(Qt::WA_DeleteOnClose);
 				designer->show();
 			});
+		}
+		if (app.arguments().contains("--selftest-remote")) {
+			// Turns the remote on at port 4466 and drives it the way a Stream Deck would: logs in, asks, switches a
+			// scene, mutes the mic, waits for the events; a wrong password must be turned away; the phone page must
+			// load. With --hold it then stays up 90 s for outside clients. Run with ZUNIMI_DATA set.
+			Settings::get().set("remote/on", true);
+			Settings::get().set("remote/lan", false);
+			Settings::get().set("remote/port", 4466);
+			Settings::get().setSecret("remote/password", "selftest-pass");
+			window.applyRemote();
+			core.addScene("Remote B");
+			core.setScene("Remote B");
+			core.addSource("color_source_v3", "Remote colour", nullptr, ObsCore::Fit::Fill);
+			core.setScene(core.scenes().first());
+			auto passed = std::make_shared<QStringList>();
+			const QStringList wanted = {"page", "login", "GetVersion", "GetSceneList", "unknown", "batch",
+						    "scene event", "mute event", "hotkey", "wrong password"};
+			auto finish = [passed, wanted, &window, &app] {
+				QStringList missing;
+				for (const QString &w : wanted)
+					if (!passed->contains(w))
+						missing << w;
+				blog(missing.isEmpty() ? LOG_INFO : LOG_ERROR, "selftest remote: %s",
+				     missing.isEmpty() ? "all passed" : ("MISSING " + missing.join(", ")).toUtf8().constData());
+				const int hold = app.arguments().contains("--hold") ? 90000 : 300;
+				QTimer::singleShot(hold, [&window] { window.modes()->quit(false); });
+			};
+			auto check = [passed, wanted, finish](bool ok, const QString &what) {
+				if (passed->contains(what))
+					return; // outside clients (--hold) cause more events; the first answer counts
+				blog(ok ? LOG_INFO : LOG_ERROR, "selftest remote: %s %s", what.toUtf8().constData(), ok ? "ok" : "FAILED");
+				if (ok && !passed->contains(what)) {
+					passed->append(what);
+					if (passed->size() == wanted.size())
+						finish();
+				}
+			};
+			QTimer::singleShot(20000, &app, [passed, wanted, finish] {
+				if (passed->size() < wanted.size())
+					finish();
+			});
+			auto *net = new QNetworkAccessManager(&app);
+			QNetworkReply *page = net->get(QNetworkRequest(QUrl("http://127.0.0.1:4466/")));
+			QObject::connect(page, &QNetworkReply::finished, &app, [page, check] {
+				check(page->readAll().contains("Zunimi remote"), "page");
+				page->deleteLater();
+			});
+			auto auth = [](const QJsonObject &d, const QByteArray &pw) {
+				const QJsonObject a = d.value("authentication").toObject();
+				auto h = [](const QByteArray &x) { return QCryptographicHash::hash(x, QCryptographicHash::Sha256).toBase64(); };
+				return QString::fromLatin1(h(h(pw + a.value("salt").toString().toLatin1()) + a.value("challenge").toString().toLatin1()));
+			};
+			auto *ws = new WebSocket(&app);
+			auto sendJson = [ws](int op, const QJsonObject &d) {
+				ws->sendText(QString::fromUtf8(QJsonDocument(QJsonObject{{"op", op}, {"d", d}}).toJson(QJsonDocument::Compact)));
+			};
+			auto req = [sendJson](const QString &type, const QJsonObject &data = {}) {
+				sendJson(6, {{"requestType", type}, {"requestId", type}, {"requestData", data}});
+			};
+			QObject::connect(ws, &WebSocket::textMessage, &app, [=, &core](const QString &text) {
+				const QJsonObject msg = QJsonDocument::fromJson(text.toUtf8()).object();
+				const int op = msg.value("op").toInt();
+				const QJsonObject d = msg.value("d").toObject();
+				if (op == 0) {
+					sendJson(1, {{"rpcVersion", 1}, {"authentication", auth(d, "selftest-pass")}});
+				} else if (op == 2) {
+					check(true, "login");
+					req("GetVersion");
+					req("GetSceneList");
+					req("NoSuchRequest");
+					sendJson(8, {{"requestId", "b"},
+						     {"requests", QJsonArray{QJsonObject{{"requestType", "GetStudioModeEnabled"}},
+									     QJsonObject{{"requestType", "GetRecordStatus"}}}}});
+					req("SetCurrentProgramScene", {{"sceneName", "Remote B"}});
+					req("ToggleInputMute", {{"inputName", QString::fromUtf8(obs_source_get_name(core.microphone()))}});
+					req("TriggerHotkeyByName", {{"hotkeyName", "zunimi.mark"}});
+				} else if (op == 7) {
+					const QString id = d.value("requestId").toString();
+					const QJsonObject st = d.value("requestStatus").toObject(), out = d.value("responseData").toObject();
+					if (id == "GetVersion")
+						check(out.value("rpcVersion").toInt() == 1 && out.value("availableRequests").toArray().size() > 40, "GetVersion");
+					else if (id == "GetSceneList")
+						check(out.value("scenes").toArray().size() >= 2 && !out.value("currentProgramSceneName").toString().isEmpty(), "GetSceneList");
+					else if (id == "NoSuchRequest")
+						check(!st.value("result").toBool() && st.value("code").toInt() == 204, "unknown");
+					else if (id == "TriggerHotkeyByName")
+						check(st.value("result").toBool(), "hotkey");
+					else if (!st.value("result").toBool())
+						check(false, id + ": " + st.value("comment").toString());
+				} else if (op == 9) {
+					const QJsonArray r = d.value("results").toArray();
+					check(r.size() == 2 && r[0].toObject().value("responseData").toObject().contains("studioModeEnabled"), "batch");
+				} else if (op == 5) {
+					const QString type = d.value("eventType").toString();
+					const QJsonObject e = d.value("eventData").toObject();
+					if (type == "CurrentProgramSceneChanged")
+						check(e.value("sceneName").toString() == "Remote B", "scene event");
+					else if (type == "InputMuteStateChanged")
+						check(e.value("inputMuted").toBool(), "mute event");
+				}
+			});
+			ws->open(QUrl("ws://127.0.0.1:4466/"));
+			auto *intruder = new WebSocket(&app);
+			auto *identified = new bool(false);
+			QObject::connect(intruder, &WebSocket::textMessage, &app, [=](const QString &text) {
+				const QJsonObject msg = QJsonDocument::fromJson(text.toUtf8()).object();
+				if (msg.value("op").toInt() == 0)
+					intruder->sendText(QString::fromUtf8(QJsonDocument(QJsonObject{
+						{"op", 1}, {"d", QJsonObject{{"rpcVersion", 1}, {"authentication", auth(msg.value("d").toObject(), "guess")}}}})
+										    .toJson(QJsonDocument::Compact)));
+				else if (msg.value("op").toInt() == 2)
+					*identified = true;
+			});
+			QObject::connect(intruder, &WebSocket::closed, &app, [=](const QString &) { check(!*identified, "wrong password"); });
+			intruder->open(QUrl("ws://127.0.0.1:4466/"));
 		}
 		if (app.arguments().contains("--selftest-update")) {
 			// Checks the link rules, then asks GitHub for releases and logs what it finds. Run with ZUNIMI_DATA set.
