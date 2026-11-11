@@ -38,6 +38,8 @@ public:
 	void applySetup(const SetupChoices &c);
 	static bool simple();                     // Simple mode: only what's needed to go live and record
 	bool selftestDocks();                     // --selftest-docks: move, float, hide, save, restore, reset, lock
+	void selftestMedia(const QStringList &files); // --selftest-media: every option on a media file, clicked
+	void selftestOptions(const QStringList &files); // --selftest-options: every source kind, every option widget
 	int dockArea(const QString &id);           // for self-tests: where a dock sits (Qt::DockWidgetArea)
 	void raiseDock(const QString &id);         // brings a tabbed dock to the front (--demo-dock, screenshots)
 	void setSimple(bool on);

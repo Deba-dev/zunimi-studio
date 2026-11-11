@@ -46,6 +46,8 @@
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QSlider>
+#include <functional>
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
@@ -55,6 +57,10 @@
 #include <QResizeEvent>
 #include <QShortcut>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QDialog>
 #include <QTabWidget>
 #include <QTextBrowser>
 #include <QStackedWidget>
@@ -646,6 +652,328 @@ bool MainWindow::selftestDocks()
 	addDockWidget(Qt::RightDockWidgetArea, mixer);
 	blog(LOG_INFO, "selftest docks: %s", all ? "all passed" : "SOME FAILED");
 	return all;
+}
+
+void MainWindow::selftestMedia(const QStringList &files)
+{
+	// Clicks every option a media file has, the way a user would, while recording: mixer mute/volume/Filters/⋯
+	// (with the mixer rebuilt while a dialog is open), play controls, options, hide/show, undo, scene switch,
+	// remove. Passing means no crash. Every line starts "selftest media:".
+	auto log = [](const QString &what) { blog(LOG_INFO, "selftest media: %s", what.toUtf8().constData()); };
+	QString err;
+	if (files.isEmpty() || !m_core->startRecording(Settings::dataDir() + "/selftest", &err)) {
+		blog(LOG_ERROR, "selftest media: FAIL could not start (%s)", err.toUtf8().constData());
+		return;
+	}
+	auto steps = std::make_shared<QVector<QPair<QString, std::function<void()>>>>();
+	auto add = [steps](const QString &what, std::function<void()> f) { steps->push_back({what, f}); };
+	auto mediaName = std::make_shared<QString>();
+	auto source = [this, mediaName]() -> obs_source_t * {
+		obs_sceneitem_t *it = m_core->item(*mediaName);
+		return it ? obs_sceneitem_get_source(it) : nullptr;
+	};
+	// a mixer button of the media row, found the way a user sees it
+	auto rowButton = [this, mediaName](const QString &text) -> QPushButton * {
+		for (QLabel *label : m_mixer->findChildren<QLabel *>())
+			if (label->text() == *mediaName)
+				for (QPushButton *b : label->parentWidget()->findChildren<QPushButton *>())
+					if (b->text() == text || (text == "mute" && b->isCheckable()))
+						return b;
+		return nullptr;
+	};
+	auto closeModalSoon = [this](int ms, bool rebuildMixer) {
+		if (rebuildMixer)
+			QTimer::singleShot(ms / 2, this, [this] { m_mixer->refresh(true); }); // a hotkey or the phone remote
+		QTimer::singleShot(ms, this, [] {
+			if (QWidget *w = QApplication::activeModalWidget())
+				w->close();
+		});
+	};
+
+	for (const QString &file : files) {
+		add("add " + QFileInfo(file).fileName(), [this, file, mediaName] {
+			obs_data_t *s = obs_data_create();
+			obs_data_set_bool(s, "looping", true);
+			obs_data_set_string(s, "local_file", file.toUtf8().constData());
+			obs_source_t *src = m_core->addSource("ffmpeg_source", "Media", s, ObsCore::Fit::Fill);
+			obs_data_release(s);
+			*mediaName = src ? QString::fromUtf8(obs_source_get_name(src)) : QString();
+			selectSource(*mediaName);
+			m_core->fit(*mediaName, ObsCore::Fit::Fill);
+		});
+		add("mixer shows it", [this, mediaName] { m_mixer->refresh(); });
+		for (int i = 0; i < 12; i++) {
+			if (i == 4)
+				add("listen in headphones: monitor only", [source] {
+					if (obs_source_t *s = source())
+						obs_source_set_monitoring_type(s, OBS_MONITORING_TYPE_MONITOR_ONLY);
+				});
+			if (i == 8)
+				add("listen in headphones: monitor and output", [source] {
+					if (obs_source_t *s = source())
+						obs_source_set_monitoring_type(s, OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT);
+				});
+			add(QString("mixer mute click %1").arg(i + 1), [rowButton] {
+				if (QPushButton *b = rowButton("mute")) {
+					b->click();
+					blog(LOG_INFO, "selftest media:   muted=%d", int(b->isChecked()));
+				} else {
+					blog(LOG_ERROR, "selftest media:   FAIL no mute button");
+				}
+			});
+		}
+		add("mixer volume slider", [this, mediaName] {
+			for (QSlider *s : m_mixer->findChildren<QSlider *>())
+				for (int v : {0, 30, 100, 70})
+					s->setValue(v);
+		});
+		add("mixer Filters (mixer rebuilt while open)", [rowButton, closeModalSoon] {
+			if (QPushButton *b = rowButton(L("Filters"))) {
+				closeModalSoon(800, true);
+				b->click();
+			}
+		});
+		add("mixer ⋯ sound settings (mixer rebuilt while open)", [rowButton, closeModalSoon] {
+			if (QPushButton *b = rowButton("⋯")) {
+				closeModalSoon(800, true);
+				b->click();
+			}
+		});
+		add("mute after the dialogs", [rowButton] {
+			if (QPushButton *b = rowButton("mute"))
+				b->click();
+		});
+		for (const char *what : {"pause", "play", "restart", "stop", "play", "next", "previous"})
+			add(QString("media %1").arg(what), [source, what] {
+				obs_source_t *s = source();
+				if (!s)
+					return;
+				const QString w = what;
+				if (w == "pause" || w == "play")
+					obs_source_media_play_pause(s, w == "pause");
+				else if (w == "restart")
+					obs_source_media_restart(s);
+				else if (w == "stop")
+					obs_source_media_stop(s);
+				else if (w == "next")
+					obs_source_media_next(s);
+				else
+					obs_source_media_previous(s);
+			});
+		add("mute while stopped/playing", [source, rowButton] {
+			if (obs_source_t *s = source())
+				obs_source_media_stop(s);
+			if (QPushButton *b = rowButton("mute"))
+				b->click();
+			if (obs_source_t *s = source())
+				obs_source_media_restart(s);
+			if (QPushButton *b = rowButton("mute"))
+				b->click();
+		});
+		add("hide / show in the sources list", [this, mediaName] {
+			for (int i = 0; i < m_sources->count(); i++)
+				if (QListWidgetItem *row = m_sources->item(i); row->data(Qt::UserRole).toString() == *mediaName) {
+					row->setCheckState(Qt::Unchecked);
+					break;
+				}
+		});
+		add("mute while hidden", [rowButton] {
+			if (QPushButton *b = rowButton("mute"))
+				b->click();
+		});
+		add("show again", [this, mediaName] { m_core->setVisible(*mediaName, true); });
+		add("options dialog (modal, OK)", [this, mediaName, closeModalSoon] {
+			closeModalSoon(900, true);
+			openProperties(*mediaName);
+		});
+		add("options: looping off, local off/on, file swap", [source, files, mediaName] {
+			obs_source_t *s = source();
+			if (!s)
+				return;
+			auto *view = new PropertiesView(s); // what the options dialog is built from
+			view->show();
+			obs_data_t *d = obs_source_get_settings(s);
+			obs_data_set_bool(d, "looping", false);
+			obs_data_set_bool(d, "is_local_file", false);
+			obs_source_update(s, d);
+			obs_data_set_bool(d, "is_local_file", true);
+			obs_data_set_string(d, "local_file", files.last().toUtf8().constData());
+			obs_data_set_bool(d, "close_when_inactive", true);
+			obs_data_set_bool(d, "hw_decode", true);
+			obs_source_update(s, d);
+			obs_data_release(d);
+			view->setSource(s);
+			QTimer::singleShot(400, view, &QObject::deleteLater);
+		});
+		add("mute after file swap", [rowButton] {
+			if (QPushButton *b = rowButton("mute"))
+				b->click();
+		});
+		add("source Filters + sound settings (modal)", [this, source, closeModalSoon] {
+			closeModalSoon(600, false);
+			openFilters(source());
+			closeModalSoon(600, true);
+			openAudio(source());
+		});
+		add("undo / redo", [this] {
+			if (m_core->canUndo())
+				m_core->undo();
+			if (m_core->canRedo())
+				m_core->redo();
+		});
+		add("mute hotkeys (mic, desktop)", [this] {
+			hotkey("mic_mute");
+			hotkey("desktop_mute");
+			hotkey("mic_mute");
+			hotkey("desktop_mute");
+		});
+		add("new scene and back", [this] {
+			const QString here = m_core->currentScene();
+			m_core->setScene(m_core->addScene("Media test"));
+			m_core->setScene(here);
+		});
+		add("mute after scene switch", [rowButton] {
+			if (QPushButton *b = rowButton("mute"))
+				b->click();
+		});
+		add("remove", [this, mediaName] { m_core->removeSource(*mediaName); });
+		add("mixer after remove", [this] { m_mixer->refresh(); });
+	}
+
+	auto index = std::make_shared<int>(0);
+	auto *turn = new QTimer(this);
+	connect(turn, &QTimer::timeout, this, [this, steps, index, turn, log] {
+		if (*index >= steps->size()) {
+			turn->stop();
+			turn->deleteLater();
+			m_core->stopRecording();
+			log(QString("%1 steps, no crash").arg(steps->size()));
+			log("all passed");
+			QTimer::singleShot(1500, this, [this] { m_modes->quit(false); });
+			return;
+		}
+		const auto &step = (*steps)[(*index)++];
+		log(step.first);
+		step.second();
+	});
+	turn->start(350);
+}
+
+void MainWindow::selftestOptions(const QStringList &files)
+{
+	// Adds every kind of source through Add (so its options dialog opens, as for a user), then changes every
+	// option widget in that dialog one after another (check boxes, lists, numbers, sliders, text, file paths),
+	// presses OK, clicks its mixer mute a few times and removes it. Runs while recording. Passing = no crash.
+	auto log = [](const QString &what) { blog(LOG_INFO, "selftest options: %s", what.toUtf8().constData()); };
+	QString err;
+	if (!m_core->startRecording(Settings::dataDir() + "/selftest", &err)) {
+		blog(LOG_ERROR, "selftest options: FAIL could not start (%s)", err.toUtf8().constData());
+		return;
+	}
+	auto fileFor = [files](const QString &id) -> QString {
+		for (const QString &f : files) {
+			const QString ext = QFileInfo(f).suffix().toLower();
+			const bool image = ext == "png" || ext == "jpg";
+			if ((id == "image_source") == image)
+				return f;
+		}
+		return {};
+	};
+	auto kinds = std::make_shared<QStringList>();
+	for (const Kind &k : KINDS)
+		*kinds << k.id;
+	auto next = std::make_shared<std::function<void(int)>>();
+	*next = [this, kinds, next, log, fileFor](int k) {
+		if (k >= kinds->size()) {
+			m_core->stopRecording();
+			log("all passed");
+			QTimer::singleShot(1500, this, [this] { m_modes->quit(false); });
+			return;
+		}
+		const QString id = (*kinds)[k];
+		log("add " + id);
+		// once its dialog is open: work through its widgets, then OK
+		QTimer::singleShot(700, this, [this, id, log, fileFor] {
+			auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+			if (!dialog) {
+				log(id + ": no options dialog");
+				return;
+			}
+			auto index = std::make_shared<int>(0);
+			auto *turn = new QTimer(dialog);
+			connect(turn, &QTimer::timeout, dialog, [dialog, index, turn, id, log, fileFor] {
+				QList<QWidget *> widgets;
+				for (QWidget *w : dialog->findChildren<QWidget *>())
+					if (w->isVisible() && w->isEnabled() &&
+					    (qobject_cast<QCheckBox *>(w) || qobject_cast<QComboBox *>(w) || qobject_cast<QAbstractSpinBox *>(w) ||
+					     qobject_cast<QSlider *>(w) || qobject_cast<QPlainTextEdit *>(w) ||
+					     (qobject_cast<QLineEdit *>(w) && !qobject_cast<QAbstractSpinBox *>(w->parentWidget()) &&
+					      !qobject_cast<QComboBox *>(w->parentWidget()))))
+						widgets << w;
+				if (*index >= widgets.size()) {
+					turn->stop();
+					log(QString("%1: %2 option widgets changed, OK").arg(id).arg(*index));
+					dialog->accept();
+					return;
+				}
+				QWidget *w = widgets[(*index)++];
+				if (auto *b = qobject_cast<QCheckBox *>(w)) {
+					b->click();
+				} else if (auto *c = qobject_cast<QComboBox *>(w)) {
+					const int n = std::min(c->count(), 5);
+					for (int i = n - 1; i >= 0; i--) { // ends on the first one
+						c->setCurrentIndex(i);
+						emit c->activated(i);
+					}
+				} else if (auto *s = qobject_cast<QSpinBox *>(w)) {
+					s->setValue(s->maximum());
+					s->setValue(s->minimum());
+				} else if (auto *d = qobject_cast<QDoubleSpinBox *>(w)) {
+					d->setValue(d->maximum());
+					d->setValue(d->minimum());
+				} else if (auto *sl = qobject_cast<QSlider *>(w)) {
+					sl->setValue(sl->maximum());
+					sl->setValue((sl->minimum() + sl->maximum()) / 2);
+				} else if (auto *t = qobject_cast<QPlainTextEdit *>(w)) {
+					t->setPlainText("Zunimi test");
+				} else if (auto *e = qobject_cast<QLineEdit *>(w)) {
+					bool path = false;
+					for (QPushButton *b : e->parentWidget()->findChildren<QPushButton *>())
+						path |= b->text() == L("Browse...");
+					if (path) {
+						const QString f = fileFor(id);
+						if (!f.isEmpty()) {
+							e->setText(QDir::toNativeSeparators(f));
+							emit e->editingFinished();
+						}
+					} else {
+						e->setText("Zunimi test");
+						emit e->textEdited(e->text());
+					}
+				}
+			});
+			turn->start(120);
+		});
+		addSource(id); // returns once the dialog is closed
+		const QString name = selectedSource();
+		log(id + ": added as '" + name + "'");
+		QTimer::singleShot(1500, this, [this, name, id, k, next, log] {
+			m_mixer->refresh();
+			int clicks = 0;
+			for (QLabel *label : m_mixer->findChildren<QLabel *>())
+				if (label->text() == name)
+					for (QPushButton *b : label->parentWidget()->findChildren<QPushButton *>())
+						if (b->isCheckable())
+							for (int i = 0; i < 4; i++, clicks++)
+								b->click();
+			log(QString("%1: %2 mute clicks").arg(id).arg(clicks));
+			QTimer::singleShot(500, this, [this, name, k, next] {
+				m_core->removeSource(name);
+				QTimer::singleShot(500, this, [k, next] { (*next)(k + 1); });
+			});
+		});
+	};
+	(*next)(0);
 }
 
 void MainWindow::raiseDock(const QString &id)

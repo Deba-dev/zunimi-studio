@@ -766,6 +766,18 @@ int main(int argc, char *argv[])
 				});
 			});
 		}
+		if (app.arguments().contains("--selftest-media")) {
+			// ZUNIMI_TEST_MEDIA="a.mp4|b.mp3": the files to put on the scene and click every option of
+			QTimer::singleShot(1500, &app, [&window] {
+				window.selftestMedia(qEnvironmentVariable("ZUNIMI_TEST_MEDIA").split('|', Qt::SkipEmptyParts));
+			});
+		}
+		if (app.arguments().contains("--selftest-options")) {
+			// same ZUNIMI_TEST_MEDIA files (a .png is used for Image)
+			QTimer::singleShot(1500, &app, [&window] {
+				window.selftestOptions(qEnvironmentVariable("ZUNIMI_TEST_MEDIA").split('|', Qt::SkipEmptyParts));
+			});
+		}
 		if (app.arguments().contains("--selftest-docks")) {
 			// Then waits for the auto-save and ends the app abruptly, as a crash would; --selftest-docks-reopen
 			// (next run, same data folder) checks the moved dock came back.
