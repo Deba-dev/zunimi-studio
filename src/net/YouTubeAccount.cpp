@@ -22,6 +22,7 @@
 
 // A Google Cloud project made for Zunimi Stream+ (OAuth client type "Desktop app"). Set both at build time
 // (-DZUNIMI_GOOGLE_CLIENT_ID=... -DZUNIMI_GOOGLE_CLIENT_SECRET=...) or in Settings (youtube/clientId, clientSecret).
+// Release builds get them from local-secrets.cmake (git-ignored, see CMakeLists.txt) so the secret is never in the repo.
 #ifndef ZUNIMI_GOOGLE_CLIENT_ID
 #define ZUNIMI_GOOGLE_CLIENT_ID ""
 #endif

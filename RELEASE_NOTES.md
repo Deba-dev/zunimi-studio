@@ -1,3 +1,14 @@
+## Zunimi Stream+ 0.5.2 (preview)
+
+Sign in with YouTube is switched on.
+
+**Install:** download **ZunimiStudio-Setup.exe** below and run it. Already on 0.5? The app offers this update by itself. If Windows SmartScreen warns you, click **More info > Run anyway** (the installer isn't code-signed yet).
+
+### YouTube streams
+- **Sign in with YouTube** (Go Live to > Pick stream, or **Tools > Your YouTube streams**) lists your scheduled and live YouTube streams. Pick one and Zunimi fills in its server and stream key for you, so there is nothing to copy and paste.
+- The sign-in is **read-only**: Zunimi never posts, uploads, edits or deletes anything on your channel, and your sign-in stays on your PC. **Sign out** removes it. Details: [privacy policy](https://zunimilabs.online/zunimi-stream/privacy/).
+- Google is still reviewing the app, so the sign-in page may say "Google hasn't verified this app". Click **Continue** to go on.
+
 ## Zunimi Stream+ 0.5.1 (preview)
 
 Go live to several platforms at once, landscape and vertical together, plus fixes from the first streams on 0.5.0.

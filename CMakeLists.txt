@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(ZunimiStudio VERSION 0.5.1 LANGUAGES C CXX)
+project(ZunimiStudio VERSION 0.5.2 LANGUAGES C CXX)
 
 # Zunimi Studio links against a libobs built from the OBS source with the "zunimi" preset
 # (see scripts/build-obs.ps1). Everything lives on D: by default; override these on the command line.
@@ -62,6 +62,15 @@ add_executable(zunimi-studio WIN32
 target_include_directories(zunimi-studio PRIVATE src third_party/qrcodegen "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(zunimi-studio PRIVATE Qt6::Widgets Qt6::Network libobs crypt32 dxgi sapi ole32 dbghelp)
 target_compile_definitions(zunimi-studio PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+# The Google OAuth client (YouTube sign-in) lives in local-secrets.cmake, which git ignores, so the secret never
+# reaches the public repo. It sets ZUNIMI_GOOGLE_CLIENT_ID and ZUNIMI_GOOGLE_CLIENT_SECRET. Without it, sign-in is off.
+include(${CMAKE_CURRENT_SOURCE_DIR}/local-secrets.cmake OPTIONAL)
+if(ZUNIMI_GOOGLE_CLIENT_ID AND ZUNIMI_GOOGLE_CLIENT_SECRET)
+  target_compile_definitions(zunimi-studio PRIVATE "ZUNIMI_GOOGLE_CLIENT_ID=\"${ZUNIMI_GOOGLE_CLIENT_ID}\""
+                                                   "ZUNIMI_GOOGLE_CLIENT_SECRET=\"${ZUNIMI_GOOGLE_CLIENT_SECRET}\"")
+else()
+  message(WARNING "local-secrets.cmake missing: YouTube sign-in will be off in this build")
+endif()
 target_compile_options(zunimi-studio PRIVATE /W3 /utf-8 /permissive- /Zc:__cplusplus)
 
 # Turns resources/logo.svg into resources/zunimi.ico and the logo PNGs (scripts/build.ps1 -Icon). Not shipped.

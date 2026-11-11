@@ -3,3 +3,4 @@ out/
 .vs/
 *.user
 CMakeUserPresets.json
+local-secrets.cmake
