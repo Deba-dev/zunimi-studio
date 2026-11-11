@@ -915,7 +915,7 @@ QWidget *SettingsDialog::windowTab()
 	m_accent = new QComboBox;
 	for (const QString &a : Theme::accents())
 		m_accent->addItem(Theme::accentName(a), a);
-	m_accent->setCurrentIndex(std::max(0, m_accent->findData(s.value("ui/accent", "violet"))));
+	m_accent->setCurrentIndex(std::max(0, m_accent->findData(s.value("ui/accent", "neon"))));
 	form->addRow(L("Accent colour"), m_accent);
 	form->addRow("", hint(L("Zunimi restarts to switch language. Words without a translation yet stay in English.")));
 	form->addRow(L("Window mode"), m_mode);
@@ -980,7 +980,7 @@ void SettingsDialog::save()
 {
 	Settings &s = Settings::get();
 	s.set("stream/platform", m_platform->currentData());
-	if (m_accent->currentData().toString() != s.value("ui/accent", "violet").toString()) {
+	if (m_accent->currentData().toString() != s.value("ui/accent", "neon").toString()) {
 		s.set("ui/accent", m_accent->currentData());
 		Theme::apply(); // at once, no restart
 	}

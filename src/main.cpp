@@ -664,6 +664,12 @@ int main(int argc, char *argv[])
 				QTimer::singleShot(3500, &core, [&core] { core.screenshot(Settings::dataDir() + "/selftest"); });
 			});
 		}
+		if (app.arguments().contains("--selftest-docks")) {
+			QTimer::singleShot(1200, &app, [&window] {
+				window.selftestDocks();
+				QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
+			});
+		}
 		if (app.arguments().contains("--selftest-templates")) {
 			// Adds every template in every style, checks what each scene holds, and writes the previews and the
 			// full-size pictures to <ZUNIMI_DATA>/selftest for a look.

@@ -34,5 +34,7 @@
  "Colour",
  "Microphone",
  "Speakers",
- "Bicubic"
+ "Bicubic",
+ "CPU",
+ "FPS"
 ]

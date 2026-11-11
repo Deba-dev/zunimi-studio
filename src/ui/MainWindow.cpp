@@ -27,10 +27,14 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDialogButtonBox>
+#include <QDockWidget>
+#include <QMenuBar>
+#include <QToolButton>
 #include <QJsonDocument>
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QComboBox>
@@ -46,6 +50,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QResizeEvent>
 #include <QShortcut>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -61,6 +66,8 @@
 #include <cmath>
 
 namespace {
+constexpr int DOCKS_VERSION = 1; // bump when the docks change so an old saved layout is not applied
+
 struct Kind {
 	const char *id, *label, *name;
 	ObsCore::Fit fit;
@@ -154,45 +161,57 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	m_assist = new Assist(m_core, this);
 	m_modes->busy = [this] { return quitWouldStop(); };
 
+	// The preview sits in the middle; everything else is a dock that can be dragged, floated, tabbed together,
+	// resized or closed (Docks menu brings it back), and the layout is remembered.
+	setDockNestingEnabled(true);
+	setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks);
 	auto *central = new QWidget;
 	auto *root = new QVBoxLayout(central);
-	root->setContentsMargins(14, 10, 14, 12);
-	root->setSpacing(10);
-	root->addWidget(buildTopBar());
-	auto *body = new QHBoxLayout;
-	body->setSpacing(10);
-	auto *left = new QVBoxLayout;
-	left->setSpacing(10);
-	left->addWidget(buildScenes());
-	left->addWidget(buildSources(), 1);
-	body->addLayout(left);
-	body->addWidget(buildPreview(), 1);
-	m_mixer = new Mixer(m_core);
-	auto *chat = new ChatPanel;
-	auto *events = new EventsPanel;
-	connect(chat, &ChatPanel::setupRequested, this, [this] { openSettings(SettingsDialog::Connections); });
-	connect(events, &EventsPanel::setupRequested, this, [this] { openSettings(SettingsDialog::Connections); });
-	auto *side = new QTabWidget;
-	side->setObjectName("side");
-	side->addTab(m_mixer, L("Audio"));
-	side->addTab(chat, L("Chat"));
-	side->addTab(events, L("Events"));
-	side->setCurrentIndex(Settings::get().value("window/sideTab", 0).toInt());
-	connect(side, &QTabWidget::currentChanged, this, [](int i) { Settings::get().set("window/sideTab", i); });
-	auto *mixerLayout = new QVBoxLayout;
-	mixerLayout->setContentsMargins(0, 0, 0, 0);
-	mixerLayout->addWidget(side);
-	QWidget *mixerPanel = panel(mixerLayout);
-	mixerPanel->setFixedWidth(300);
-	body->addWidget(mixerPanel);
-	root->addLayout(body, 1);
+	root->setContentsMargins(0, 0, 0, 0);
+	root->setSpacing(8);
+	root->addWidget(buildPreview(), 1);
 	m_banner = new QLabel;
 	m_banner->setWordWrap(true);
 	m_banner->hide();
 	root->addWidget(m_banner);
 	root->addWidget(buildUpdateBar());
-	root->addWidget(buildBottomBar());
 	setCentralWidget(central);
+
+	m_mixer = new Mixer(m_core);
+	auto *chat = new ChatPanel;
+	auto *events = new EventsPanel;
+	connect(chat, &ChatPanel::setupRequested, this, [this] { openSettings(SettingsDialog::Connections); });
+	connect(events, &EventsPanel::setupRequested, this, [this] { openSettings(SettingsDialog::Connections); });
+	QDockWidget *scenes = addDock("scenes", L("Scenes"), buildScenes(), Qt::LeftDockWidgetArea);
+	QDockWidget *sources = addDock("sources", L("Sources"), buildSources(), Qt::LeftDockWidgetArea);
+	splitDockWidget(scenes, sources, Qt::Vertical);
+	QDockWidget *controls = addDock("controls", L("Controls"), buildControls(), Qt::RightDockWidgetArea);
+	QDockWidget *session = addDock("session", L("Stats"), buildSession(), Qt::RightDockWidgetArea, true);
+	splitDockWidget(controls, session, Qt::Vertical);
+	QDockWidget *chatDock = addDock("chat", L("Chat"), chat, Qt::RightDockWidgetArea);
+	QDockWidget *eventsDock = addDock("events", L("Events"), events, Qt::RightDockWidgetArea, true);
+	tabifyDockWidget(session, chatDock);
+	tabifyDockWidget(chatDock, eventsDock);
+	session->raise();
+	QDockWidget *mixer = addDock("mixer", L("Audio Mixer"), m_mixer, Qt::BottomDockWidgetArea);
+	QDockWidget *transitions = addDock("transitions", L("Scene Transitions"), buildTransitions(), Qt::BottomDockWidgetArea, true);
+	splitDockWidget(mixer, transitions, Qt::Horizontal);
+	resizeDocks({scenes, sources}, {220, 380}, Qt::Vertical);
+	resizeDocks({scenes, controls}, {280, 300}, Qt::Horizontal);
+	resizeDocks({controls, session}, {470, 300}, Qt::Vertical);
+	resizeDocks({mixer, transitions}, {700, 280}, Qt::Horizontal);
+	resizeDocks({mixer}, {200}, Qt::Vertical);
+	buildMenuBar();
+	m_defaultDocks = saveState(DOCKS_VERSION);
+	{
+		Settings &st = Settings::get();
+		setFullHeightDocks(st.value("docks/fullHeight", true).toBool());
+		const QByteArray saved = QByteArray::fromBase64(st.value("docks/state").toString().toLatin1());
+		if (!saved.isEmpty())
+			restoreState(saved, DOCKS_VERSION);
+		setDocksLocked(st.value("docks/locked", false).toBool());
+	}
+	connect(qApp, &QCoreApplication::aboutToQuit, this, &MainWindow::saveDocks);
 	buildTray();
 
 	m_bannerTimer = new QTimer(this);
@@ -221,6 +240,8 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 		updatePreview();
 	});
 	connect(m_core, &ObsCore::recordingChanged, this, [this](bool on, const QString &file) {
+		if (on)
+			m_recSince.start();
 		if (!on && QFileInfo::exists(file))
 			say(L("Recording saved: ") + QFileInfo(file).fileName());
 		updateButtons();
@@ -416,64 +437,211 @@ void MainWindow::checkForUpdates()
 }
 
 // ---- layout
-QWidget *MainWindow::buildTopBar()
+void MainWindow::buildMenuBar()
 {
-	auto *bar = new QWidget;
-	bar->setObjectName("topbar");
-	auto *row = new QHBoxLayout(bar);
-	row->setContentsMargins(4, 0, 4, 0);
-	row->setSpacing(10);
+	QMenuBar *bar = menuBar();
+	bar->setObjectName("menubar");
+	// left: logo, name and version; right: stream health, Fix it and the Auto-Tune profile
+	auto *brandBox = new QWidget;
+	auto *brandRow = new QHBoxLayout(brandBox);
+	brandRow->setContentsMargins(10, 6, 14, 6);
+	brandRow->setSpacing(8);
 	auto *logo = new QLabel;
-	logo->setPixmap(QPixmap(":/logo-64.png").scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-	auto *brand = new QLabel(L("ZUNIMI STUDIO"));
+	logo->setPixmap(QPixmap(":/logo-64.png").scaled(26, 26, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+	auto *brand = new QLabel(QString("Zunimi <span style='color:%1'>Stream+</span>").arg(Theme::Accent2.name()));
 	brand->setObjectName("brand");
+	brand->setTextFormat(Qt::RichText);
+	auto *version = new QLabel("v" ZUNIMI_VERSION);
+	version->setObjectName("pill");
+	brandRow->addWidget(logo);
+	brandRow->addWidget(brand);
+	brandRow->addWidget(version);
+	bar->setCornerWidget(brandBox, Qt::TopLeftCorner);
+
+	auto *status = new QWidget;
+	auto *row = new QHBoxLayout(status);
+	row->setContentsMargins(8, 4, 10, 4);
+	row->setSpacing(8);
 	m_healthDot = new QLabel;
 	m_healthDot->setFixedSize(10, 10);
 	m_health = new QLabel(L("Ready"));
-	m_stats = new QLabel;
-	m_stats->setObjectName("chip");
-	m_stats->setProperty("pro", true);
-	m_profile = new QLabel;
-	m_profile->setObjectName("chip");
-	auto *more = button(L("Menu"), "", L("Undo, scene collections, profiles, import, studio mode, projectors, virtual camera, stats"));
-	auto *mainMenu = new QMenu(more);
-	connect(mainMenu, &QMenu::aboutToShow, this, [this, mainMenu] { fillMainMenu(mainMenu); });
-	more->setMenu(mainMenu);
-	auto *settings = button(L("Settings"), "", L("Stream key, quality, recording, replay, hotkeys, window"));
-	connect(settings, &QPushButton::clicked, this, [this] { openSettings(); });
-	row->addWidget(logo);
-	row->addWidget(brand);
-	row->addSpacing(16);
-	row->addWidget(m_healthDot);
-	row->addWidget(m_health);
+	m_health->setObjectName("mute");
 	m_fix = button(L("Fix it"), "primary", L("Stream Doctor: one click to fix what the health bar shows"));
 	m_fix->hide();
 	connect(m_fix, &QPushButton::clicked, this, [this] {
 		m_assist->applyFix(m_fixId);
 		m_fix->hide();
 	});
+	m_profile = new QLabel;
+	m_profile->setObjectName("chip");
+	row->addWidget(m_healthDot);
+	row->addWidget(m_health);
 	row->addWidget(m_fix);
-	row->addStretch(1);
-	row->addWidget(m_stats);
 	row->addWidget(m_profile);
-	row->addWidget(more);
-	row->addWidget(settings);
-	return bar;
+	bar->setCornerWidget(status, Qt::TopRightCorner);
+
+	// each menu is filled when it opens, so it always shows the current state (undo text, collections...)
+	auto menu = [this, bar](const QString &title, void (MainWindow::*fill)(QMenu *)) {
+		QMenu *m = bar->addMenu(title);
+		connect(m, &QMenu::aboutToShow, this, [this, m, fill] {
+			m->clear();
+			(this->*fill)(m);
+		});
+		return m;
+	};
+	menu(L("File"), &MainWindow::fillFileMenu);
+	menu(L("Edit"), &MainWindow::fillEditMenu);
+	menu(L("View"), &MainWindow::fillViewMenu);
+	menu(L("Docks"), &MainWindow::fillDocksMenu);
+	QMenu *profile = menu(L("Profile"), &MainWindow::fillProfilesMenu);
+	QMenu *collection = menu(L("Scene Collection"), &MainWindow::fillCollectionsMenu);
+	profile->menuAction()->setProperty("proMenu", true);
+	collection->menuAction()->setProperty("proMenu", true);
+	menu(L("Tools"), &MainWindow::fillToolsMenu);
+	menu(L("Help"), &MainWindow::fillHelpMenu);
+}
+
+QDockWidget *MainWindow::addDock(const QString &id, const QString &title, QWidget *content, Qt::DockWidgetArea area,
+				 bool pro)
+{
+	auto *dock = new QDockWidget(title, this);
+	dock->setObjectName("dock_" + id); // saveState/restoreState find docks by this name
+	auto *body = new QWidget;
+	body->setObjectName("dockBody");
+	body->setAttribute(Qt::WA_StyledBackground);
+	auto *col = new QVBoxLayout(body);
+	col->setContentsMargins(10, 8, 10, 10);
+	col->addWidget(content);
+	dock->setWidget(body);
+	dock->setProperty("proDock", pro);
+	dock->toggleViewAction()->setText(title);
+	addDockWidget(area, dock);
+	m_docks << dock;
+	return dock;
+}
+
+void MainWindow::fillDocksMenu(QMenu *menu)
+{
+	const bool easy = simple();
+	for (QDockWidget *dock : m_docks) {
+		if (easy && dock->property("proDock").toBool())
+			continue;
+		menu->addAction(dock->toggleViewAction());
+	}
+	menu->addSeparator();
+	QAction *lock = menu->addAction(L("Lock docks"), this, [this](bool on) { setDocksLocked(on); });
+	lock->setCheckable(true);
+	lock->setChecked(Settings::get().value("docks/locked", false).toBool());
+	lock->setToolTip(L("Docks can't be moved or closed while locked"));
+	QAction *full = menu->addAction(L("Full-height side docks"), this, [this](bool on) { setFullHeightDocks(on); });
+	full->setCheckable(true);
+	full->setChecked(Settings::get().value("docks/fullHeight", true).toBool());
+	menu->addSeparator();
+	menu->addAction(L("Reset docks"), this, &MainWindow::resetDocks);
+}
+
+void MainWindow::resetDocks()
+{
+	setFullHeightDocks(true);
+	restoreState(m_defaultDocks, DOCKS_VERSION);
+	for (QDockWidget *dock : m_docks) {
+		dock->setFloating(false);
+		dock->setVisible(!(simple() && dock->property("proDock").toBool()));
+	}
+	saveDocks();
+	say(L("Docks are back in their places."));
+}
+
+void MainWindow::setDocksLocked(bool locked)
+{
+	Settings::get().set("docks/locked", locked);
+	const auto features = locked ? QDockWidget::NoDockWidgetFeatures
+				     : QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable |
+					       QDockWidget::DockWidgetClosable;
+	for (QDockWidget *dock : m_docks)
+		dock->setFeatures(features);
+}
+
+void MainWindow::setFullHeightDocks(bool on)
+{
+	Settings::get().set("docks/fullHeight", on);
+	// on: the side docks run the whole height and the bottom docks sit between them, under the preview
+	setCorner(Qt::BottomLeftCorner, on ? Qt::LeftDockWidgetArea : Qt::BottomDockWidgetArea);
+	setCorner(Qt::BottomRightCorner, on ? Qt::RightDockWidgetArea : Qt::BottomDockWidgetArea);
+	setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
+	setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+}
+
+void MainWindow::saveDocks()
+{
+	Settings::get().set("docks/state", QString::fromLatin1(saveState(DOCKS_VERSION).toBase64()));
+}
+
+bool MainWindow::selftestDocks()
+{
+	bool all = true;
+	auto check = [&all](bool ok, const QString &what) {
+		all &= ok;
+		blog(ok ? LOG_INFO : LOG_ERROR, "selftest docks: %s %s", ok ? "ok  " : "FAIL", what.toUtf8().constData());
+	};
+	auto dock = [this](const char *id) { return findChild<QDockWidget *>(QString("dock_") + id); };
+	const auto free = QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable;
+	check(m_docks.size() == 8, QString("%1 docks").arg(m_docks.size()));
+	for (QDockWidget *d : m_docks)
+		check((d->features() & free) == free, d->windowTitle() + " can be moved, floated and closed");
+	QDockWidget *mixer = dock("mixer"), *transitions = dock("transitions"), *events = dock("events"), *scenes = dock("scenes");
+	check(mixer && transitions && events && scenes, "docks are found by name");
+	if (!(mixer && transitions && events && scenes))
+		return false;
+	check(dockWidgetArea(scenes) == Qt::LeftDockWidgetArea && dockWidgetArea(mixer) == Qt::BottomDockWidgetArea,
+	      "default places: Scenes left, Audio Mixer below the preview");
+
+	// the user rearranges: mixer to the right, transitions floating, events closed
+	addDockWidget(Qt::RightDockWidgetArea, mixer);
+	transitions->setFloating(true);
+	events->hide();
+	saveDocks();
+	const QByteArray mine = saveState(DOCKS_VERSION);
+	resetDocks();
+	check(dockWidgetArea(mixer) == Qt::BottomDockWidgetArea && !transitions->isFloating() && !events->isHidden(),
+	      "Reset docks puts every dock back and shows it");
+	restoreState(mine, DOCKS_VERSION);
+	check(dockWidgetArea(mixer) == Qt::RightDockWidgetArea && transitions->isFloating() && events->isHidden(),
+	      "a saved layout comes back exactly (moved, floating, closed)");
+	resetDocks();
+
+	setDocksLocked(true);
+	bool locked = true;
+	for (QDockWidget *d : m_docks)
+		locked &= d->features() == QDockWidget::NoDockWidgetFeatures;
+	check(locked, "Lock docks stops moving and closing");
+	setDocksLocked(false);
+	check((scenes->features() & free) == free, "unlocking frees them again");
+
+	setSimple(true);
+	check(transitions->isHidden() && events->isHidden() && !scenes->isHidden(), "Simple mode hides the Pro docks only");
+	setSimple(false);
+	check(!transitions->isHidden() && !events->isHidden(), "Pro mode brings them back where they were");
+
+	setFullHeightDocks(false);
+	check(corner(Qt::BottomLeftCorner) == Qt::BottomDockWidgetArea, "full-height side docks can be turned off");
+	setFullHeightDocks(true);
+	check(corner(Qt::BottomLeftCorner) == Qt::LeftDockWidgetArea, "and on");
+	blog(LOG_INFO, "selftest docks: %s", all ? "all passed" : "SOME FAILED");
+	return all;
 }
 
 QWidget *MainWindow::buildScenes()
 {
 	auto *col = new QVBoxLayout;
-	col->setContentsMargins(12, 12, 12, 12);
+	col->setContentsMargins(0, 0, 0, 0);
 	col->setSpacing(8);
-	auto *title = new QLabel(L("Scenes"));
-	title->setObjectName("h2");
 	m_scenes = new QListWidget;
 	m_scenes->setToolTip(L("Click to switch. Double-click to rename. Hotkeys for scenes 1-9 are in Settings > Hotkeys."));
-	m_scenes->setFixedHeight(128);
+	m_scenes->setMinimumHeight(90);
 	auto *add = button("+", "icon", L("New scene"));
-	auto *copy = button(L("Copy"), "icon", L("Duplicate this scene (sources are shared)"));
-	auto *rename = button(L("Rename"), "icon");
+	auto *copy = button("⧉", "icon", L("Duplicate this scene (sources are shared)"));
+	auto *rename = button("✎", "icon", L("Rename"));
 	auto *remove = button("✕", "icon", L("Remove this scene"));
 	auto *up = button("↑", "icon", L("Move up"));
 	auto *down = button("↓", "icon", L("Move down"));
@@ -486,32 +654,6 @@ QWidget *MainWindow::buildScenes()
 	tools->addStretch();
 	tools->addWidget(up);
 	tools->addWidget(down);
-
-	m_transition = new QComboBox;
-	for (const auto &[id, label] : ObsCore::transitionKinds())
-		m_transition->addItem(label, id);
-	m_transition->setCurrentIndex(std::max(0, m_transition->findData(m_core->transitionId())));
-	m_transitionMs = new QSpinBox;
-	m_transitionMs->setRange(0, 20000);
-	m_transitionMs->setSingleStep(100);
-	m_transitionMs->setSuffix(" ms");
-	m_transitionMs->setValue(m_core->transitionMs());
-	auto applyTransition = [this] {
-		m_core->setTransition(m_transition->currentData().toString(), m_transitionMs->value());
-	};
-	connect(m_transition, &QComboBox::activated, this, [this, applyTransition] {
-		if (m_transition->currentData().toString() == "obs_stinger_transition")
-			chooseTransition(); // needs a video
-		else
-			applyTransition();
-	});
-	connect(m_transitionMs, &QSpinBox::editingFinished, this, applyTransition);
-	auto *transition = new QHBoxLayout;
-	auto *tlabel = new QLabel(L("Transition"));
-	tlabel->setObjectName("mute");
-	transition->addWidget(tlabel);
-	transition->addWidget(m_transition, 1);
-	transition->addWidget(m_transitionMs);
 
 	connect(m_scenes, &QListWidget::currentRowChanged, this, [this](int row) {
 		if (row >= 0)
@@ -551,26 +693,19 @@ QWidget *MainWindow::buildScenes()
 	connect(up, &QPushButton::clicked, this, [this] { m_core->moveScene(m_core->currentScene(), true); });
 	connect(down, &QPushButton::clicked, this, [this] { m_core->moveScene(m_core->currentScene(), false); });
 
-	col->addWidget(title);
-	col->addWidget(m_scenes);
+	col->addWidget(m_scenes, 1);
 	col->addLayout(tools);
-	auto *transitionBox = new QWidget;
-	transition->setContentsMargins(0, 0, 0, 0);
-	transitionBox->setLayout(transition);
-	transitionBox->setProperty("pro", true);
-	col->addWidget(transitionBox);
-	QWidget *w = panel(col);
-	w->setFixedWidth(310);
+	auto *w = new QWidget;
+	w->setLayout(col);
+	w->setMinimumWidth(230);
 	return w;
 }
 
 QWidget *MainWindow::buildSources()
 {
 	auto *col = new QVBoxLayout;
-	col->setContentsMargins(12, 12, 12, 12);
+	col->setContentsMargins(0, 0, 0, 0);
 	col->setSpacing(8);
-	auto *title = new QLabel(L("Sources"));
-	title->setObjectName("h2");
 	m_sources = new QListWidget;
 	m_sources->setToolTip(L("Tick to show or hide. Double-click for its options. Right-click for more."));
 	m_sources->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -630,13 +765,13 @@ QWidget *MainWindow::buildSources()
 			m_core->removeSource(selectedSource());
 	});
 
-	col->addWidget(title);
 	col->addWidget(m_sources, 1);
 	col->addWidget(m_empty, 1);
 	col->addLayout(tools);
 	col->addWidget(add);
-	QWidget *w = panel(col);
-	w->setFixedWidth(310);
+	auto *w = new QWidget;
+	w->setLayout(col);
+	w->setMinimumWidth(230);
 	return w;
 }
 
@@ -781,39 +916,142 @@ QWidget *MainWindow::buildPreview()
 	return panel(col);
 }
 
-QWidget *MainWindow::buildBottomBar()
+QWidget *MainWindow::buildTransitions()
 {
-	auto *row = new QHBoxLayout;
-	row->setContentsMargins(14, 10, 14, 10);
-	row->setSpacing(12);
-	auto *hint = new QLabel(L("Drag sources in the preview to move them, drag a corner to resize. Right-click for more."));
-	hint->setObjectName("mute");
-	row->addWidget(hint, 1);
-	m_clock = new QLabel;
-	m_clock->setObjectName("mute");
+	m_transition = new QComboBox;
+	for (const auto &[id, label] : ObsCore::transitionKinds())
+		m_transition->addItem(label, id);
+	m_transition->setCurrentIndex(std::max(0, m_transition->findData(m_core->transitionId())));
+	m_transitionMs = new QSpinBox;
+	m_transitionMs->setRange(0, 20000);
+	m_transitionMs->setSingleStep(100);
+	m_transitionMs->setSuffix(" ms");
+	m_transitionMs->setValue(m_core->transitionMs());
+	auto applyTransition = [this] {
+		m_core->setTransition(m_transition->currentData().toString(), m_transitionMs->value());
+	};
+	connect(m_transition, &QComboBox::activated, this, [this, applyTransition] {
+		if (m_transition->currentData().toString() == "obs_stinger_transition")
+			chooseTransition(); // needs a video
+		else
+			applyTransition();
+	});
+	connect(m_transitionMs, &QSpinBox::editingFinished, this, applyTransition);
+
+	auto *form = new QFormLayout;
+	form->setContentsMargins(0, 0, 0, 0);
+	form->setSpacing(8);
+	form->addRow(L("Transition"), m_transition);
+	form->addRow(L("Duration"), m_transitionMs);
+	auto *w = new QWidget;
+	auto *col = new QVBoxLayout(w);
+	col->setContentsMargins(0, 0, 0, 0);
+	col->addLayout(form);
+	col->addStretch();
+	w->setMinimumWidth(240);
+	return w;
+}
+
+QWidget *MainWindow::buildControls()
+{
+	auto *col = new QVBoxLayout;
+	col->setContentsMargins(0, 0, 0, 0);
+	col->setSpacing(8);
+	m_live = button(L("Start Streaming"), "live", L("Start or stop streaming"));
+	m_rec = button(L("Start Recording"), "rec", L("Start or stop recording"));
+	m_pause = button(L("Pause"), "", L("Pause the recording without ending the file"));
+	m_vcam = button(L("Start Virtual Camera"), "", L("Use what's on air as a webcam in Discord, Zoom, Meet and other apps"));
+	m_vcam->setCheckable(true);
+	m_vcam->setProperty("pro", true);
+	m_studio = button(L("Studio Mode"), "", L("Edit the preview, then press Go to send it live"));
+	m_studio->setCheckable(true);
+	m_studio->setProperty("pro", true);
 	m_replay = button(L("Replay buffer"), "", L("Keeps the last seconds in memory so you can save a moment after it happens"));
 	m_replay->setCheckable(true);
 	m_saveReplay = button(L("Save replay"), "", L("Saves the last seconds as an MP4 (set a hotkey in Settings > Hotkeys)"));
-	m_rec = button(L("Record"), "rec", L("Start or stop recording"));
-	m_pause = button(L("Pause"), "", L("Pause the recording without ending the file"));
-	m_vcam = button(L("Virtual camera"), "", L("Use what's on air as a webcam in Discord, Zoom, Meet and other apps"));
-	m_vcam->setCheckable(true);
-	m_vcam->setProperty("pro", true);
+	auto *settings = button(L("Settings"), "", L("Stream key, quality, recording, replay, hotkeys, window"));
+	auto *exit = button(L("Exit"), "", L("Quit (asks first while you are live or recording)"));
+	connect(m_live, &QPushButton::clicked, this, &MainWindow::toggleStream);
+	connect(m_rec, &QPushButton::clicked, this, &MainWindow::toggleRecord);
 	connect(m_pause, &QPushButton::clicked, this, &MainWindow::togglePause);
 	connect(m_vcam, &QPushButton::clicked, this, &MainWindow::toggleVirtualCam);
-	m_live = button(L("Go Live"), "live", L("Start or stop streaming"));
+	connect(m_studio, &QPushButton::clicked, this, [this] { m_core->setStudioMode(!m_core->studioMode()); });
 	connect(m_replay, &QPushButton::clicked, this, &MainWindow::toggleReplay);
 	connect(m_saveReplay, &QPushButton::clicked, this, &MainWindow::saveReplay);
-	connect(m_rec, &QPushButton::clicked, this, &MainWindow::toggleRecord);
-	connect(m_live, &QPushButton::clicked, this, &MainWindow::toggleStream);
-	row->addWidget(m_clock);
-	row->addWidget(m_vcam);
-	row->addWidget(m_replay);
-	row->addWidget(m_saveReplay);
-	row->addWidget(m_pause);
-	row->addWidget(m_rec);
-	row->addWidget(m_live);
-	return panel(row);
+	connect(settings, &QPushButton::clicked, this, [this] { openSettings(); });
+	connect(exit, &QPushButton::clicked, m_modes, [this] { m_modes->quit(); });
+	col->addWidget(m_live);
+	auto *recRow = new QHBoxLayout;
+	recRow->setSpacing(8);
+	recRow->addWidget(m_rec, 1);
+	recRow->addWidget(m_pause);
+	col->addLayout(recRow);
+	col->addWidget(m_vcam);
+	col->addWidget(m_studio);
+	auto *replayRow = new QHBoxLayout;
+	replayRow->setSpacing(8);
+	replayRow->addWidget(m_replay, 1);
+	replayRow->addWidget(m_saveReplay);
+	col->addLayout(replayRow);
+	auto *last = new QHBoxLayout;
+	last->setSpacing(8);
+	last->addWidget(settings, 1);
+	last->addWidget(exit, 1);
+	col->addLayout(last);
+	// the card at the bottom: a little encouragement and what Auto-Tune chose
+	auto *card = new QWidget;
+	card->setObjectName("hero");
+	card->setAttribute(Qt::WA_StyledBackground);
+	auto *cardCol = new QVBoxLayout(card);
+	cardCol->setContentsMargins(16, 14, 16, 14);
+	cardCol->setSpacing(4);
+	auto *slogan = new QLabel(L("Go Live.\nBe Legendary."));
+	slogan->setObjectName("slogan");
+	m_tune = new QLabel;
+	m_tune->setObjectName("heroNote");
+	m_tune->setWordWrap(true);
+	cardCol->addWidget(slogan);
+	cardCol->addWidget(m_tune);
+	col->addSpacing(4);
+	col->addWidget(card);
+	col->addStretch();
+	auto *w = new QWidget;
+	w->setLayout(col);
+	w->setMinimumWidth(250);
+	return w;
+}
+
+QWidget *MainWindow::buildSession()
+{
+	auto *grid = new QGridLayout;
+	grid->setContentsMargins(0, 0, 0, 0);
+	grid->setSpacing(8);
+	auto tile = [grid](const QString &name, int r, int c) {
+		auto *box = new QWidget;
+		box->setObjectName("tile");
+		box->setAttribute(Qt::WA_StyledBackground);
+		auto *col = new QVBoxLayout(box);
+		col->setContentsMargins(12, 8, 12, 8);
+		col->setSpacing(2);
+		auto *label = new QLabel(name);
+		label->setObjectName("tileLabel");
+		auto *value = new QLabel("00:00:00");
+		value->setObjectName("tileValue");
+		col->addWidget(label);
+		col->addWidget(value);
+		grid->addWidget(box, r, c);
+		return value;
+	};
+	m_liveTime = tile(L("LIVE"), 0, 0);
+	m_recTime = tile(L("REC"), 0, 1);
+	m_cpu = tile(L("CPU"), 1, 0);
+	m_fps = tile(L("FPS"), 1, 1);
+	m_cpu->setText("–");
+	m_fps->setText("–");
+	grid->setRowStretch(2, 1); // tiles keep their size; extra room goes below them
+	auto *w = new QWidget;
+	w->setLayout(grid);
+	return w;
 }
 
 QWidget *MainWindow::buildUpdateBar()
@@ -1318,9 +1556,9 @@ void MainWindow::updateButtons()
 {
 	const bool live = m_core->streaming(), rec = m_core->recording(), replay = m_core->replaying();
 	m_live->setEnabled(true);
-	m_live->setText(live ? L("End stream") : L("Go Live"));
+	m_live->setText(live ? L("Stop Streaming") : L("Start Streaming"));
 	m_live->setProperty("on", live);
-	m_rec->setText(rec ? L("Stop recording") : L("Record"));
+	m_rec->setText(rec ? L("Stop Recording") : L("Start Recording"));
 	m_rec->setProperty("on", rec);
 	m_replay->setChecked(replay);
 	m_replay->setText(replay ? L("Replay buffer: on") : L("Replay buffer"));
@@ -1332,7 +1570,7 @@ void MainWindow::updateButtons()
 	restyle(m_pause);
 	const bool vcam = m_core->virtualCam();
 	m_vcam->setChecked(vcam);
-	m_vcam->setText(vcam ? L("Virtual camera: on") : L("Virtual camera"));
+	m_vcam->setText(vcam ? L("Stop Virtual Camera") : L("Start Virtual Camera"));
 	m_vcam->setProperty("on", vcam);
 	restyle(m_vcam);
 	restyle(m_live);
@@ -1341,8 +1579,9 @@ void MainWindow::updateButtons()
 	m_trayLive->setText(live ? L("End stream") : L("Go Live"));
 	m_trayRec->setText(rec ? L("Stop recording") : L("Start recording"));
 	m_trayReplay->setEnabled(replay);
-	if (!live && !rec)
-		m_clock->clear();
+	m_studio->setChecked(m_core->studioMode());
+	m_studio->setProperty("on", m_core->studioMode());
+	restyle(m_studio);
 }
 
 void MainWindow::openSettings(int tab)
@@ -1377,25 +1616,36 @@ void MainWindow::tick()
 	const QColor dot = h.level == 2 ? Theme::Live : h.level == 1 ? Theme::Warn : Theme::Good;
 	m_healthDot->setStyleSheet(QString("background:%1; border-radius:5px;").arg(dot.name()));
 	m_health->setText(h.text);
-	m_stats->setText(QString(L("CPU %1%  ·  RAM %2 MB  ·  %3 fps"))
-				 .arg(h.cpu, 0, 'f', 0)
-				 .arg(h.ramMb, 0, 'f', 0)
-				 .arg(h.fps, 0, 'f', 0));
+	if (QWidget *corner = menuBar()->cornerWidget(Qt::TopRightCorner); corner && corner->sizeHint() != corner->size()) {
+		QResizeEvent resize(menuBar()->size(), menuBar()->size());
+		QCoreApplication::sendEvent(menuBar(), &resize);
+	}
+	m_cpu->setText(QString("%1%").arg(h.cpu, 0, 'f', 1));
+	m_cpu->setToolTip(QString(L("RAM %1 MB")).arg(h.ramMb, 0, 'f', 0));
+	m_fps->setText(QString::number(h.fps, 'f', 2));
 	const VideoPlan &p = m_core->plan();
 	m_profile->setText(QString("%1  ·  %2p%3  ·  %4")
 				   .arg(profileName(profileFromKey(Settings::get().value("video/profile").toString())))
 				   .arg(p.height)
 				   .arg(p.fps)
 				   .arg(encoderLabel(p.encoder)));
-	if (m_core->streaming() && m_liveSince.isValid()) {
-		const qint64 secs = m_liveSince.elapsed() / 1000;
-		m_clock->setText(QString(L("LIVE  %1:%2:%3"))
-					 .arg(secs / 3600, 2, 10, QChar('0'))
-					 .arg((secs / 60) % 60, 2, 10, QChar('0'))
-					 .arg(secs % 60, 2, 10, QChar('0')));
-	} else if (m_core->recording()) {
-		m_clock->setText(m_core->recordingPaused() ? L("Recording paused") : L("Recording"));
-	}
+	m_tune->setText(QString(L("Auto-Tune picked %1 for this PC."))
+				.arg(profileName(profileFromKey(Settings::get().value("video/profile").toString()))));
+	auto clock = [](const QElapsedTimer &t) {
+		const qint64 secs = t.elapsed() / 1000;
+		return QString("%1:%2:%3")
+			.arg(secs / 3600, 2, 10, QChar('0'))
+			.arg((secs / 60) % 60, 2, 10, QChar('0'))
+			.arg(secs % 60, 2, 10, QChar('0'));
+	};
+	const bool live = m_core->streaming() && m_liveSince.isValid();
+	const bool rec = m_core->recording() && m_recSince.isValid();
+	m_liveTime->setText(live ? clock(m_liveSince) : "00:00:00");
+	m_recTime->setText(rec ? (m_core->recordingPaused() ? L("Paused") : clock(m_recSince)) : "00:00:00");
+	m_liveTime->setProperty("on", live);
+	m_recTime->setProperty("on", rec);
+	restyle(m_liveTime);
+	restyle(m_recTime);
 }
 
 void MainWindow::updatePreview()
@@ -1484,11 +1734,31 @@ void MainWindow::closeEvent(QCloseEvent *event)
 	QApplication::quit();
 }
 
-// ---- main menu
-void MainWindow::fillMainMenu(QMenu *menu)
+// ---- menus (filled each time they open)
+namespace {
+void openFolder(const QString &folder)
 {
-	menu->clear();
-	const bool easy = simple();
+	QDir().mkpath(folder);
+	QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+}
+} // namespace
+
+void MainWindow::fillFileMenu(QMenu *menu)
+{
+	menu->addAction(L("Settings..."), this, [this] { openSettings(); });
+	QMenu *import = menu->addMenu(L("Import"));
+	import->addAction(L("From OBS Studio on this PC..."), this, &MainWindow::importFromObs);
+	import->addAction(L("Overlay pack or scene collection (.json)..."), this, &MainWindow::importCollection);
+	menu->addSeparator();
+	menu->addAction(L("Open recordings folder"), this,
+			[] { openFolder(Settings::get().value("record/folder", defaultFolder()).toString()); });
+	menu->addAction(L("Open log files"), this, [] { openFolder(Settings::dataDir() + "/logs"); });
+	menu->addSeparator();
+	menu->addAction(L("Exit"), m_modes, [this] { m_modes->quit(); });
+}
+
+void MainWindow::fillEditMenu(QMenu *menu)
+{
 	QAction *undo = menu->addAction(m_core->canUndo() ? L("Undo ") + m_core->undoLabel() : L("Undo"), this,
 					[this] { m_core->undo(); });
 	undo->setShortcut(QKeySequence::Undo);
@@ -1498,42 +1768,59 @@ void MainWindow::fillMainMenu(QMenu *menu)
 	redo->setShortcut(QKeySequence("Ctrl+Y"));
 	redo->setEnabled(m_core->canRedo());
 	menu->addSeparator();
-	if (!easy) {
-		fillCollectionsMenu(menu->addMenu(L("Scene collections  (") + m_core->collection() + ")"));
-		fillProfilesMenu(menu->addMenu(L("Profiles  (") + m_core->profile() + ")"));
-	}
-	QMenu *import = menu->addMenu(L("Import"));
-	import->addAction(L("From OBS Studio on this PC..."), this, &MainWindow::importFromObs);
-	import->addAction(L("Overlay pack or scene collection (.json)..."), this, &MainWindow::importCollection);
+	const bool picked = !selectedSource().isEmpty();
+	QAction *copy = menu->addAction(L("Copy size and place"), this, [this] { m_core->copyTransform(selectedSource()); });
+	copy->setShortcut(QKeySequence::Copy);
+	copy->setEnabled(picked);
+	QAction *paste = menu->addAction(L("Paste size and place"), this, [this] { m_core->pasteTransform(selectedSource()); });
+	paste->setShortcut(QKeySequence::Paste);
+	paste->setEnabled(picked);
+	QAction *rotate = menu->addAction(L("Rotate 90°"), this, [this] { m_core->rotate(selectedSource(), 90); });
+	rotate->setShortcut(QKeySequence("Ctrl+R"));
+	rotate->setEnabled(picked);
 	menu->addSeparator();
-	if (easy) {
-		menu->addAction(L("Screenshot of what's on air"), this, [this] { screenshot(); });
-		menu->addAction(L("Mark moment  (chapter + saved replay)"), this, [this] { m_assist->mark(); });
-		menu->addAction(L("Open recordings folder"), this, [] {
-			const QString folder = Settings::get().value("record/folder", defaultFolder()).toString();
-			QDir().mkpath(folder);
-			QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
-		});
-		menu->addSeparator();
-		menu->addAction(L("Run the setup again..."), this, &MainWindow::runSetup);
-		menu->addAction(L("Switch to Pro mode  (all the tools)"), this, [this] { setSimple(false); });
-		return;
-	}
-	QAction *studio = menu->addAction(L("Studio mode  (edit, then Go)"), this,
-					  [this] { m_core->setStudioMode(!m_core->studioMode()); });
-	studio->setCheckable(true);
-	studio->setChecked(m_core->studioMode());
-	QAction *vertical = menu->addAction(L("Vertical canvas  (Shorts, Reels, TikTok)"), this, [this] {
-		QString error;
-		if (!m_core->setVertical(!m_core->verticalOn(), &error))
-			say(error, true);
+	QAction *props = menu->addAction(L("Source options..."), this, [this] { openProperties(selectedSource()); });
+	props->setEnabled(picked);
+}
+
+void MainWindow::fillViewMenu(QMenu *menu)
+{
+	const bool easy = simple();
+	QAction *mode = menu->addAction(L("Simple mode  (fewer buttons)"), this, [this](bool on) { setSimple(on); });
+	mode->setCheckable(true);
+	mode->setChecked(easy);
+	QAction *preview = menu->addAction(L("Preview"), this, [this](bool on) {
+		m_previewWanted = on;
+		updatePreview();
 	});
-	vertical->setCheckable(true);
-	vertical->setChecked(m_core->verticalOn());
-	fillProjectorMenu(menu->addMenu(L("Projector  (what's on air)")), nullptr);
-	QAction *vcam = menu->addAction(L("Virtual camera"), this, &MainWindow::toggleVirtualCam);
-	vcam->setCheckable(true);
-	vcam->setChecked(m_core->virtualCam());
+	preview->setCheckable(true);
+	preview->setChecked(m_previewWanted);
+	if (!easy) {
+		menu->addSeparator();
+		QAction *studio = menu->addAction(L("Studio mode  (edit, then Go)"), this,
+						  [this] { m_core->setStudioMode(!m_core->studioMode()); });
+		studio->setCheckable(true);
+		studio->setChecked(m_core->studioMode());
+		QAction *vertical = menu->addAction(L("Vertical canvas  (Shorts, Reels, TikTok)"), this, [this] {
+			QString error;
+			if (!m_core->setVertical(!m_core->verticalOn(), &error))
+				say(error, true);
+		});
+		vertical->setCheckable(true);
+		vertical->setChecked(m_core->verticalOn());
+		fillProjectorMenu(menu->addMenu(L("Projector  (what's on air)")), nullptr);
+		menu->addAction(L("Stats window"), this, [this] {
+			auto *dialog = new StatsDialog(m_core, this);
+			dialog->setAttribute(Qt::WA_DeleteOnClose);
+			dialog->show();
+		});
+	}
+	menu->addSeparator();
+	fillDocksMenu(menu->addMenu(L("Docks")));
+}
+
+void MainWindow::fillToolsMenu(QMenu *menu)
+{
 	menu->addAction(L("Screenshot of what's on air"), this, [this] { screenshot(); });
 	menu->addAction(L("Mark moment  (chapter + saved replay)"), this, [this] { m_assist->mark(); });
 	menu->addAction(L("Check my setup now"), this, [this] {
@@ -1547,22 +1834,29 @@ void MainWindow::fillMainMenu(QMenu *menu)
 			lines << (f.level >= 2 ? "• " : "◦ ") + f.text;
 		QMessageBox::information(this, L("Setup check"), lines.join("\n"));
 	});
-	menu->addSeparator();
-	menu->addAction(L("Stats"), this, [this] {
-		auto *dialog = new StatsDialog(m_core, this);
-		dialog->setAttribute(Qt::WA_DeleteOnClose);
-		dialog->show();
-	});
-	menu->addAction(L("Open recordings folder"), this, [] {
-		const QString folder = Settings::get().value("record/folder", defaultFolder()).toString();
-		QDir().mkpath(folder);
-		QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
-	});
-	menu->addAction(L("Open log files"), this,
-			[] { QDesktopServices::openUrl(QUrl::fromLocalFile(Settings::dataDir() + "/logs")); });
+	if (!simple()) {
+		QAction *vcam = menu->addAction(L("Virtual camera"), this, &MainWindow::toggleVirtualCam);
+		vcam->setCheckable(true);
+		vcam->setChecked(m_core->virtualCam());
+		menu->addAction(L("Phone and Stream Deck remote..."), this, [this] { openSettings(SettingsDialog::Remote); });
+		menu->addAction(L("Chat and alert connections..."), this, [this] { openSettings(SettingsDialog::Connections); });
+	}
 	menu->addSeparator();
 	menu->addAction(L("Run the setup again..."), this, &MainWindow::runSetup);
-	menu->addAction(L("Switch to Simple mode  (fewer buttons)"), this, [this] { setSimple(true); });
+}
+
+void MainWindow::fillHelpMenu(QMenu *menu)
+{
+	menu->addAction(L("Check for updates"), this, &MainWindow::checkForUpdates);
+	menu->addAction(L("Website and guides"), this, [] { QDesktopServices::openUrl(QUrl("https://zunimilabs.online")); });
+	menu->addAction(L("Open log files"), this, [] { openFolder(Settings::dataDir() + "/logs"); });
+	menu->addSeparator();
+	menu->addAction(L("About"), this, [this] {
+		QMessageBox::about(this, L("About"),
+				   QString("<b>Zunimi Stream+ %1</b><br>%2<br><br>%3")
+					   .arg(ZUNIMI_VERSION, L("Made by ZunimiLabs."),
+						L("Built on OBS Studio's libobs (GPL-2.0). Not affiliated with the OBS Project.")));
+	});
 }
 
 // ---- Simple / Pro and the first-time setup
@@ -1577,7 +1871,7 @@ void MainWindow::setSimple(bool on)
 	if (on && m_core->studioMode())
 		m_core->setStudioMode(false);
 	applyLevel();
-	say(on ? L("Simple mode: just what you need to go live and record. Menu > Switch to Pro mode brings back "
+	say(on ? L("Simple mode: just what you need to go live and record. Untick View > Simple mode to bring back "
 		 "every tool.")
 	       : L("Pro mode: every tool is shown."));
 }
@@ -1588,6 +1882,22 @@ void MainWindow::applyLevel()
 	for (QWidget *w : findChildren<QWidget *>())
 		if (w->property("pro").toBool())
 			w->setVisible(!easy);
+	// Pro-only docks hide in Simple mode and come back where they were in Pro mode
+	for (QDockWidget *dock : m_docks)
+		if (dock->property("proDock").toBool()) {
+			if (easy) {
+				if (!dock->property("hiddenBySimple").toBool() && dock->isVisible()) {
+					dock->setProperty("hiddenBySimple", true);
+					dock->hide();
+				}
+			} else if (dock->property("hiddenBySimple").toBool()) {
+				dock->setProperty("hiddenBySimple", false);
+				dock->show();
+			}
+		}
+	for (QAction *a : menuBar()->actions())
+		if (a->property("proMenu").toBool())
+			a->setVisible(!easy);
 	if (m_mixer)
 		m_mixer->refresh(true);
 }

@@ -115,10 +115,8 @@ void LevelMeter::paintEvent(QPaintEvent *)
 Mixer::Mixer(ObsCore *core, QWidget *parent) : QWidget(parent), m_core(core)
 {
 	auto *outer = new QVBoxLayout(this);
-	outer->setContentsMargins(12, 12, 12, 12);
+	outer->setContentsMargins(0, 0, 0, 0); // it lives in the Audio Mixer dock, whose title bar names it
 	outer->setSpacing(8);
-	auto *title = new QLabel(L("Audio"));
-	title->setObjectName("h2");
 	auto *area = new QScrollArea;
 	area->setWidgetResizable(true);
 	area->setFrameShape(QFrame::NoFrame);
@@ -135,7 +133,6 @@ Mixer::Mixer(ObsCore *core, QWidget *parent) : QWidget(parent), m_core(core)
 	cleanup->setChecked(core->micCleanup());
 	cleanup->setEnabled(core->microphone() != nullptr);
 	connect(cleanup, &QCheckBox::toggled, core, &ObsCore::setMicCleanup);
-	outer->addWidget(title);
 	outer->addWidget(area, 1);
 	outer->addWidget(cleanup);
 

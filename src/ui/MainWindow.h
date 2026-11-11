@@ -16,6 +16,7 @@ class PreviewWidget;
 class WindowModes;
 class QAction;
 class QComboBox;
+class QDockWidget;
 class QLabel;
 class QListWidget;
 class QMenu;
@@ -35,6 +36,7 @@ public:
 	void runSetup();                          // the first-time setup (also from Menu)
 	void applySetup(const SetupChoices &c);
 	static bool simple();                     // Simple mode: only what's needed to go live and record
+	bool selftestDocks();                     // --selftest-docks: move, float, hide, save, restore, reset, lock
 	void setSimple(bool on);
 
 protected:
@@ -42,15 +44,28 @@ protected:
 	void closeEvent(QCloseEvent *event) override;
 
 private:
-	QWidget *buildTopBar();
+	void buildMenuBar();
 	QWidget *buildScenes();
 	QWidget *buildSources();
 	QWidget *buildPreview();
-	QWidget *buildBottomBar();
+	QWidget *buildTransitions();
+	QWidget *buildControls();
+	QWidget *buildSession();
 	QWidget *buildUpdateBar();
+	// docks: every panel can be dragged, floated, tabbed together, resized and closed, like OBS
+	QDockWidget *addDock(const QString &id, const QString &title, QWidget *content, Qt::DockWidgetArea area, bool pro = false);
+	void fillDocksMenu(QMenu *menu);
+	void resetDocks();
+	void setDocksLocked(bool locked);
+	void setFullHeightDocks(bool on);
+	void saveDocks();
 	void buildTray();
 	void fillAddMenu(QMenu *menu);
-	void fillMainMenu(QMenu *menu);
+	void fillFileMenu(QMenu *menu);
+	void fillEditMenu(QMenu *menu);
+	void fillViewMenu(QMenu *menu);
+	void fillToolsMenu(QMenu *menu);
+	void fillHelpMenu(QMenu *menu);
 	void fillCollectionsMenu(QMenu *menu);
 	void fillProfilesMenu(QMenu *menu);
 	void fillProjectorMenu(QMenu *menu, obs_source_t *source);
@@ -127,10 +142,17 @@ private:
 	Mixer *m_mixer = nullptr;
 	QLabel *m_health = nullptr;
 	QLabel *m_healthDot = nullptr;
-	QLabel *m_stats = nullptr;
+	QLabel *m_cpu = nullptr;
+	QLabel *m_fps = nullptr;
+	QLabel *m_liveTime = nullptr;
+	QLabel *m_recTime = nullptr;
+	QLabel *m_tune = nullptr;
+	QPushButton *m_studio = nullptr;
+	QList<QDockWidget *> m_docks;
+	QByteArray m_defaultDocks;
+	QElapsedTimer m_recSince;
 	QLabel *m_profile = nullptr;
 	QLabel *m_banner = nullptr;
-	QLabel *m_clock = nullptr;
 	QPushButton *m_live = nullptr;
 	QPushButton *m_rec = nullptr;
 	QPushButton *m_replay = nullptr;
