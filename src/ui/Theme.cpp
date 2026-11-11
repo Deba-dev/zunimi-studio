@@ -130,6 +130,10 @@ QWidget#dockBody { background: @panel; border: 1px solid @line; border-top: none
 	border-bottom-right-radius: 14px; }
 QWidget#hero { border: 1px solid @accent; border-radius: 14px;
 	background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 @accmid, stop:1 @acc2mid); }
+QPushButton#hero { text-align: left; padding: 0; }
+QPushButton#hero:hover { border: 1px solid @acc2; }
+QPushButton#hero[on="true"] { border: 1px solid @live; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(220, 38, 38, 90), stop:1 @acc2mid); }
+QPushButton#hero:disabled { border: 1px solid @line; }
 QLabel#slogan { font-size: 16pt; font-weight: 800; color: white; }
 QLabel#heroNote { color: #E2DCFB; }
 QWidget#tile { background: @bg; border: 1px solid @line; border-radius: 11px; }

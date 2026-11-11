@@ -34,6 +34,7 @@
 #include <QUrl>
 #include <QUuid>
 #include <QUrlQuery>
+#include <cstdlib>
 #include <memory>
 #include <QIcon>
 #include <QLockFile>
@@ -718,8 +719,22 @@ int main(int argc, char *argv[])
 			});
 		}
 		if (app.arguments().contains("--selftest-docks")) {
+			// Then waits for the auto-save and ends the app abruptly, as a crash would; --selftest-docks-reopen
+			// (next run, same data folder) checks the moved dock came back.
 			QTimer::singleShot(1200, &app, [&window] {
 				window.selftestDocks();
+				QTimer::singleShot(4500, [] {
+					blog(LOG_INFO, "selftest docks: auto-saved, ending abruptly");
+					std::_Exit(0);
+				});
+			});
+		}
+		if (app.arguments().contains("--selftest-docks-reopen")) {
+			QTimer::singleShot(1200, &app, [&window] {
+				const bool ok = window.dockArea("mixer") == int(Qt::RightDockWidgetArea);
+				blog(ok ? LOG_INFO : LOG_ERROR, "selftest docks: %s the moved Audio Mixer is still on the right after a crash",
+				     ok ? "ok  " : "FAIL");
+				blog(LOG_INFO, "selftest docks: %s", ok ? "all passed" : "SOME FAILED");
 				QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
 			});
 		}

@@ -209,9 +209,17 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 		const QByteArray saved = QByteArray::fromBase64(st.value("docks/state").toString().toLatin1());
 		if (!saved.isEmpty())
 			restoreState(saved, DOCKS_VERSION);
+		m_savedDocks = saved.isEmpty() ? m_defaultDocks : saved;
 		setDocksLocked(st.value("docks/locked", false).toBool());
 	}
 	connect(qApp, &QCoreApplication::aboutToQuit, this, &MainWindow::saveDocks);
+	// also every few seconds when it changed: a crash or a forced close must not lose the layout
+	auto *dockSaver = new QTimer(this);
+	connect(dockSaver, &QTimer::timeout, this, [this] {
+		if (isVisible() && saveState(DOCKS_VERSION) != m_savedDocks)
+			saveDocks();
+	});
+	dockSaver->start(3000);
 	buildTray();
 
 	m_bannerTimer = new QTimer(this);
@@ -574,7 +582,8 @@ void MainWindow::setFullHeightDocks(bool on)
 
 void MainWindow::saveDocks()
 {
-	Settings::get().set("docks/state", QString::fromLatin1(saveState(DOCKS_VERSION).toBase64()));
+	m_savedDocks = saveState(DOCKS_VERSION);
+	Settings::get().set("docks/state", QString::fromLatin1(m_savedDocks.toBase64()));
 }
 
 bool MainWindow::selftestDocks()
@@ -627,8 +636,16 @@ bool MainWindow::selftestDocks()
 	check(corner(Qt::BottomLeftCorner) == Qt::BottomDockWidgetArea, "full-height side docks can be turned off");
 	setFullHeightDocks(true);
 	check(corner(Qt::BottomLeftCorner) == Qt::LeftDockWidgetArea, "and on");
+	// leave one change behind, like a user would: the auto-save must keep it even if the app dies
+	addDockWidget(Qt::RightDockWidgetArea, mixer);
 	blog(LOG_INFO, "selftest docks: %s", all ? "all passed" : "SOME FAILED");
 	return all;
+}
+
+int MainWindow::dockArea(const QString &id)
+{
+	QDockWidget *d = findChild<QDockWidget *>("dock_" + id);
+	return d ? int(dockWidgetArea(d)) : -1;
 }
 
 QWidget *MainWindow::buildScenes()
@@ -999,25 +1016,32 @@ QWidget *MainWindow::buildControls()
 	last->addWidget(exit, 1);
 	col->addLayout(last);
 	// the card at the bottom: a little encouragement and what Auto-Tune chose
-	auto *card = new QWidget;
-	card->setObjectName("hero");
-	card->setAttribute(Qt::WA_StyledBackground);
-	auto *cardCol = new QVBoxLayout(card);
+	// The Go Live card: one big button that starts the stream, and shows how long you've been live
+	m_hero = new QPushButton;
+	m_hero->setObjectName("hero");
+	m_hero->setCursor(Qt::PointingHandCursor);
+	m_hero->setToolTip(L("Start or stop streaming"));
+	auto *cardCol = new QVBoxLayout(m_hero);
 	cardCol->setContentsMargins(16, 14, 16, 14);
 	cardCol->setSpacing(4);
-	auto *slogan = new QLabel(L("Go Live.\nBe Legendary."));
-	slogan->setObjectName("slogan");
+	m_slogan = new QLabel(L("Go Live.\nBe Legendary."));
+	m_slogan->setObjectName("slogan");
 	m_tune = new QLabel;
 	m_tune->setObjectName("heroNote");
 	m_tune->setWordWrap(true);
-	cardCol->addWidget(slogan);
+	for (QLabel *l : {m_slogan, m_tune})
+		l->setAttribute(Qt::WA_TransparentForMouseEvents); // clicks go to the card
+	cardCol->addWidget(m_slogan);
 	cardCol->addWidget(m_tune);
+	m_hero->setMinimumHeight(118);
+	connect(m_hero, &QPushButton::clicked, this, &MainWindow::toggleStream);
 	col->addSpacing(4);
-	col->addWidget(card);
+	col->addWidget(m_hero);
 	col->addStretch();
 	auto *w = new QWidget;
 	w->setLayout(col);
 	w->setMinimumWidth(250);
+	w->setMinimumHeight(w->sizeHint().height()); // the dock can't be squeezed until the card disappears
 	return w;
 }
 
@@ -1428,6 +1452,10 @@ void MainWindow::sourceMenu(const QString &requested, const QPoint &global)
 void MainWindow::toggleStream()
 {
 	if (m_core->streaming()) {
+		// the stream sends what is still buffered before it ends, which takes a few seconds: say so at once
+		m_live->setEnabled(false);
+		m_live->setText(L("Stopping..."));
+		m_hero->setEnabled(false);
 		m_core->stopStream();
 		say(L("Stream ended."));
 		return;
@@ -1446,6 +1474,8 @@ void MainWindow::toggleStream()
 	QString error;
 	m_live->setEnabled(false);
 	m_live->setText(L("Connecting..."));
+	m_hero->setEnabled(false);
+	m_slogan->setText(L("Connecting..."));
 	if (!m_core->startStream(s.value("stream/server").toString(), key, &error)) {
 		say(L("Could not go live: ") + error, true);
 		updateButtons();
@@ -1455,12 +1485,18 @@ void MainWindow::toggleStream()
 void MainWindow::toggleRecord()
 {
 	if (m_core->recording()) {
+		m_rec->setEnabled(false);
+		m_rec->setText(L("Saving...")); // the file is finished off before the button can say Start again
 		m_core->stopRecording();
 		return;
 	}
 	QString error;
-	if (!m_core->startRecording(Settings::get().value("record/folder", defaultFolder()).toString(), &error))
+	m_rec->setEnabled(false);
+	m_rec->setText(L("Starting..."));
+	if (!m_core->startRecording(Settings::get().value("record/folder", defaultFolder()).toString(), &error)) {
 		say(L("Could not record: ") + error, true);
+		updateButtons();
+	}
 }
 
 void MainWindow::toggleReplay()
@@ -1557,6 +1593,11 @@ void MainWindow::updateButtons()
 	const bool live = m_core->streaming(), rec = m_core->recording(), replay = m_core->replaying();
 	m_live->setEnabled(true);
 	m_live->setText(live ? L("Stop Streaming") : L("Start Streaming"));
+	m_hero->setEnabled(true);
+	m_hero->setProperty("on", live);
+	m_slogan->setText(live ? L("You're live.\nBe Legendary.") : L("Go Live.\nBe Legendary."));
+	restyle(m_hero);
+	m_rec->setEnabled(true);
 	m_live->setProperty("on", live);
 	m_rec->setText(rec ? L("Stop Recording") : L("Start Recording"));
 	m_rec->setProperty("on", rec);
@@ -1629,8 +1670,8 @@ void MainWindow::tick()
 				   .arg(p.height)
 				   .arg(p.fps)
 				   .arg(encoderLabel(p.encoder)));
-	m_tune->setText(QString(L("Auto-Tune picked %1 for this PC."))
-				.arg(profileName(profileFromKey(Settings::get().value("video/profile").toString()))));
+	const QString tune = QString(L("Auto-Tune picked %1 for this PC."))
+				     .arg(profileName(profileFromKey(Settings::get().value("video/profile").toString())));
 	auto clock = [](const QElapsedTimer &t) {
 		const qint64 secs = t.elapsed() / 1000;
 		return QString("%1:%2:%3")
@@ -1641,6 +1682,7 @@ void MainWindow::tick()
 	const bool live = m_core->streaming() && m_liveSince.isValid();
 	const bool rec = m_core->recording() && m_recSince.isValid();
 	m_liveTime->setText(live ? clock(m_liveSince) : "00:00:00");
+	m_tune->setText(live ? QString(L("Live for %1. Click to end the stream.")).arg(clock(m_liveSince)) : tune);
 	m_recTime->setText(rec ? (m_core->recordingPaused() ? L("Paused") : clock(m_recSince)) : "00:00:00");
 	m_liveTime->setProperty("on", live);
 	m_recTime->setProperty("on", rec);

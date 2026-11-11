@@ -719,7 +719,8 @@ void YouTubeChat::poll()
 			for (const char *k : {"invalidationContinuationData", "timedContinuationData", "reloadContinuationData"}) {
 				if (o.contains(k)) {
 					m_continuation = o.value(k).toObject().value("continuation").toString();
-					wait = std::clamp(o.value(k).toObject().value("timeoutMs").toInt(3000), 1000, 10000);
+					// YouTube suggests up to 10 s on quiet chats, which shows messages late; 2 s at most
+					wait = std::clamp(o.value(k).toObject().value("timeoutMs").toInt(2000), 1000, 2000);
 				}
 			}
 		}

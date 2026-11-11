@@ -37,6 +37,7 @@ public:
 	void applySetup(const SetupChoices &c);
 	static bool simple();                     // Simple mode: only what's needed to go live and record
 	bool selftestDocks();                     // --selftest-docks: move, float, hide, save, restore, reset, lock
+	int dockArea(const QString &id);           // for self-tests: where a dock sits (Qt::DockWidgetArea)
 	void setSimple(bool on);
 
 protected:
@@ -148,6 +149,9 @@ private:
 	QLabel *m_recTime = nullptr;
 	QLabel *m_tune = nullptr;
 	QPushButton *m_studio = nullptr;
+	QPushButton *m_hero = nullptr;      // the Go Live card
+	QLabel *m_slogan = nullptr;
+	QByteArray m_savedDocks;           // what was last written, so the layout is saved only when it changes
 	QList<QDockWidget *> m_docks;
 	QByteArray m_defaultDocks;
 	QElapsedTimer m_recSince;
