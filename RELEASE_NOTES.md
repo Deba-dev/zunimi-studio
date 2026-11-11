@@ -1,3 +1,22 @@
+## Zunimi Stream+ 0.5.0 (preview)
+
+A new look and a window you can arrange your way: every panel is now a dock, like in OBS.
+
+**Install:** download **ZunimiStudio-Setup.exe** below and run it. Already on 0.4? The app offers this update by itself. If Windows SmartScreen warns you, click **More info > Run anyway** (the installer isn't code-signed yet).
+
+### Docks you can move
+- **Scenes, Sources, Audio Mixer, Scene Transitions, Controls, Stats, Chat and Events** are docks. Drag one by its title to any side, drop it on another to make tabs, pop it out as its own window (great for a second screen), resize it or close it.
+- Your layout is remembered. **Docks** menu: show or hide each dock, **Lock docks** so nothing moves by accident, **Full-height side docks**, and **Reset docks** to go back to the default.
+- Simple mode hides the Pro docks and brings them back where you left them.
+
+### New look
+- Purple and blue neon glass, with a new **Neon** accent (Violet, Sunset, Ocean and Mint are still in Settings > Window).
+- A real menu bar: File, Edit, View, Docks, Profile, Scene Collection, Tools and Help.
+- **Controls:** Start Streaming, Start Recording, Virtual Camera, Studio Mode, replay buffer, Settings and Exit in one place.
+- **Stats:** live and recording timers, CPU and FPS.
+- An eye on each source to show or hide it.
+- All of it in Hindi too.
+
 ## Zunimi Studio 0.4.0 (preview)
 
 Hindi, a remote for your phone and Stream Deck, ready-made scenes, a first-time setup, game capture that anti-cheat games accept, and a new look.
