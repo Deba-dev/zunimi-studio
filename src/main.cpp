@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include "ui/Theme.h"
 #include "ui/WindowModes.h"
+#include "ui/YouTubeStreams.h"
 #include "net/WebSocket.h"
 #include "version.h"
 
@@ -663,6 +664,13 @@ int main(int argc, char *argv[])
 				QString error;
 				templates::apply(&core, kind, style, &error);
 				QTimer::singleShot(3500, &core, [&core] { core.screenshot(Settings::dataDir() + "/selftest"); });
+			});
+		}
+		if (app.arguments().contains("--demo-youtube")) {
+			QTimer::singleShot(900, &app, [&window] {
+				auto *d = new YouTubeStreamsDialog(&window);
+				d->setAttribute(Qt::WA_DeleteOnClose);
+				d->show();
 			});
 		}
 		if (app.arguments().contains("--demo-dock")) {

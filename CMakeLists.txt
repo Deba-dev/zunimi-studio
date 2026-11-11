@@ -47,6 +47,8 @@ add_executable(zunimi-studio WIN32
   src/ui/LivePanels.cpp src/ui/LivePanels.h
   src/net/WebSocket.cpp src/net/WebSocket.h
   src/net/Remote.cpp src/net/Remote.h
+  src/net/YouTubeAccount.cpp src/net/YouTubeAccount.h
+  src/ui/YouTubeStreams.cpp src/ui/YouTubeStreams.h
   third_party/qrcodegen/qrcodegen.cpp
   src/events/Events.cpp src/events/Events.h
   src/overlays/Overlays.cpp src/overlays/Overlays.h

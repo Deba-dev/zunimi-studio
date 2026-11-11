@@ -57,6 +57,7 @@ private:
 	QWidget *buildGoLive();                  // Go Live to: every destination with a switch and a status light
 	void refreshGoLive(bool rebuild);
 	void addDestinationDialog();
+	void pickYouTubeStream();                // sign in to YouTube and pick a scheduled stream
 	QWidget *buildUpdateBar();
 	// docks: every panel can be dragged, floated, tabbed together, resized and closed, like OBS
 	QDockWidget *addDock(const QString &id, const QString &title, QWidget *content, Qt::DockWidgetArea area, bool pro = false);

@@ -21,6 +21,8 @@
 #include "ui/Templates.h"
 #include "ui/Theme.h"
 #include "ui/WindowModes.h"
+#include "ui/YouTubeStreams.h"
+#include "net/YouTubeAccount.h"
 #include "version.h"
 
 #include <QApplication>
@@ -1140,7 +1142,16 @@ void MainWindow::refreshGoLive(bool rebuild)
 			m_goLive << g;
 		};
 		Settings &st = Settings::get();
-		row(platformName(st.value("stream/platform", "twitch").toString()) + L("  (main)"), false, nullptr);
+		const bool youtube = st.value("stream/platform", "twitch").toString() == "youtube";
+		QPushButton *pickStream = nullptr;
+		if (youtube) { // pick one of your scheduled YouTube streams (sign-in)
+			pickStream = button(L("Pick stream"), "icon", L("Your scheduled and live YouTube streams"));
+			connect(pickStream, &QPushButton::clicked, this, &MainWindow::pickYouTubeStream);
+		}
+		const QString chosen = youtube ? st.value("youtube/broadcastTitle").toString() : QString();
+		row(platformName(st.value("stream/platform", "twitch").toString()) + L("  (main)") +
+			    (chosen.isEmpty() ? QString() : "\n" + chosen),
+		    false, pickStream);
 		for (int i = 0; i < list.size(); i++) {
 			auto *on = new QCheckBox;
 			on->setChecked(list[i].on);
@@ -1180,6 +1191,15 @@ void MainWindow::refreshGoLive(bool rebuild)
 	for (int i = 0; i < list.size() && i + 1 < m_goLive.size(); i++) {
 		const ObsCore::DestinationState s = i < states.size() ? states[i] : ObsCore::DestinationState{"off", {}};
 		paint(m_goLive[i + 1], live ? s.state : "off", s.error, list[i].on && !list[i].server.trimmed().isEmpty());
+	}
+}
+
+void MainWindow::pickYouTubeStream()
+{
+	YouTubeStreamsDialog dialog(this);
+	if (dialog.exec() == QDialog::Accepted) {
+		refreshGoLive(true);
+		say(QString(L("Start Streaming now goes to your YouTube stream \"%1\".")).arg(dialog.picked()));
 	}
 }
 
@@ -2084,6 +2104,7 @@ void MainWindow::fillToolsMenu(QMenu *menu)
 			lines << (f.level >= 2 ? "• " : "◦ ") + f.text;
 		QMessageBox::information(this, L("Setup check"), lines.join("\n"));
 	});
+	menu->addAction(L("Your YouTube streams..."), this, &MainWindow::pickYouTubeStream);
 	if (!simple()) {
 		QAction *vcam = menu->addAction(L("Virtual camera"), this, &MainWindow::toggleVirtualCam);
 		vcam->setCheckable(true);
