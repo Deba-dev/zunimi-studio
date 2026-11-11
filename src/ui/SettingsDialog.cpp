@@ -165,8 +165,8 @@ QWidget *SettingsDialog::streamTab()
 	m_autoRecord = new QCheckBox(L("Record automatically while live (and stop with the stream)"));
 	m_autoRecord->setChecked(s.value("stream/autoRecord", false).toBool());
 	form->addRow("", m_autoRecord);
-	m_destinations = new QTableWidget(0, 4);
-	m_destinations->setHorizontalHeaderLabels({L("On"), L("Name"), L("Server"), L("Stream key")});
+	m_destinations = new QTableWidget(0, 5);
+	m_destinations->setHorizontalHeaderLabels({L("On"), L("Name"), L("Server"), L("Stream key"), L("Picture")});
 	m_destinations->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
 	m_destinations->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
 	m_destinations->setMinimumHeight(110);
@@ -182,6 +182,11 @@ QWidget *SettingsDialog::streamTab()
 		auto *key = new QLineEdit(d.key);
 		key->setEchoMode(QLineEdit::Password);
 		m_destinations->setCellWidget(r, 3, key);
+		auto *picture = new QComboBox;
+		picture->addItem(L("Landscape 16:9"), false);
+		picture->addItem(L("Vertical 9:16"), true);
+		picture->setCurrentIndex(d.vertical ? 1 : 0);
+		m_destinations->setCellWidget(r, 4, picture);
 	};
 	for (const ObsCore::Destination &d : ObsCore::destinations())
 		addDestination(d);
@@ -199,8 +204,10 @@ QWidget *SettingsDialog::streamTab()
 	destButtons->addStretch();
 	form->addRow(L("Also stream to"), m_destinations);
 	form->addRow("", destButtons);
-	form->addRow("", hint(L("Multistream: the same picture goes to every platform ticked here at the same time. It "
-			      "costs upload speed (one stream's bitrate per platform), not CPU.")));
+	form->addRow("", hint(L("Multistream: every platform ticked here goes live with you. Landscape ones get the "
+			      "normal picture; Vertical 9:16 ones get the vertical canvas (Shorts, TikTok, Reels), which "
+			      "switches itself on. Each costs upload speed (one stream's bitrate). Quick on/off: the Go Live "
+			      "to panel.")));
 	m_streamTrack = new QComboBox;
 	for (int i = 1; i <= 6; i++)
 		m_streamTrack->addItem(QString(L("Track %1")).arg(i), i);
@@ -1033,8 +1040,10 @@ void SettingsDialog::save()
 	for (int r = 0; r < m_destinations->rowCount(); r++) {
 		auto cell = [this, r](int c) { return m_destinations->item(r, c) ? m_destinations->item(r, c)->text().trimmed() : QString(); };
 		auto *key = qobject_cast<QLineEdit *>(m_destinations->cellWidget(r, 3));
+		auto *picture = qobject_cast<QComboBox *>(m_destinations->cellWidget(r, 4));
 		dests.append({cell(1), cell(2), key ? key->text().trimmed() : QString(),
-			      m_destinations->item(r, 0) && m_destinations->item(r, 0)->checkState() == Qt::Checked});
+			      m_destinations->item(r, 0) && m_destinations->item(r, 0)->checkState() == Qt::Checked,
+			      picture && picture->currentData().toBool()});
 	}
 	ObsCore::setDestinations(dests);
 	QJsonArray rules;

@@ -158,6 +158,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	resize(1360, 820);
 	setMinimumSize(1040, 600);
 	m_modes = new WindowModes(this, ZUNIMI_NAME);
+	ObsCore::moveOldVerticalStream();
 	m_assist = new Assist(m_core, this);
 	m_modes->busy = [this] { return quitWouldStop(); };
 
@@ -190,7 +191,9 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	splitDockWidget(controls, session, Qt::Vertical);
 	QDockWidget *chatDock = addDock("chat", L("Chat"), chat, Qt::RightDockWidgetArea);
 	QDockWidget *eventsDock = addDock("events", L("Events"), events, Qt::RightDockWidgetArea, true);
-	tabifyDockWidget(session, chatDock);
+	QDockWidget *goLive = addDock("golive", L("Go Live to"), buildGoLive(), Qt::RightDockWidgetArea);
+	tabifyDockWidget(session, goLive);
+	tabifyDockWidget(goLive, chatDock);
 	tabifyDockWidget(chatDock, eventsDock);
 	session->raise();
 	QDockWidget *mixer = addDock("mixer", L("Audio Mixer"), m_mixer, Qt::BottomDockWidgetArea);
@@ -247,6 +250,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 		updateButtons();
 		updatePreview();
 	});
+	connect(m_core, &ObsCore::streamingChanged, this, [this] { refreshGoLive(false); });
 	connect(m_core, &ObsCore::recordingChanged, this, [this](bool on, const QString &file) {
 		if (on)
 			m_recSince.start();
@@ -595,7 +599,7 @@ bool MainWindow::selftestDocks()
 	};
 	auto dock = [this](const char *id) { return findChild<QDockWidget *>(QString("dock_") + id); };
 	const auto free = QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable;
-	check(m_docks.size() == 8, QString("%1 docks").arg(m_docks.size()));
+	check(m_docks.size() == 9, QString("%1 docks").arg(m_docks.size()));
 	for (QDockWidget *d : m_docks)
 		check((d->features() & free) == free, d->windowTitle() + " can be moved, floated and closed");
 	QDockWidget *mixer = dock("mixer"), *transitions = dock("transitions"), *events = dock("events"), *scenes = dock("scenes");
@@ -640,6 +644,14 @@ bool MainWindow::selftestDocks()
 	addDockWidget(Qt::RightDockWidgetArea, mixer);
 	blog(LOG_INFO, "selftest docks: %s", all ? "all passed" : "SOME FAILED");
 	return all;
+}
+
+void MainWindow::raiseDock(const QString &id)
+{
+	if (QDockWidget *d = findChild<QDockWidget *>("dock_" + id)) {
+		d->show();
+		d->raise();
+	}
 }
 
 int MainWindow::dockArea(const QString &id)
@@ -1043,6 +1055,200 @@ QWidget *MainWindow::buildControls()
 	w->setMinimumWidth(250);
 	w->setMinimumHeight(w->sizeHint().height()); // the dock can't be squeezed until the card disappears
 	return w;
+}
+
+namespace {
+QString platformName(const QString &key)
+{
+	if (key == "twitch")
+		return "Twitch";
+	if (key == "youtube")
+		return "YouTube";
+	if (key == "kick")
+		return "Kick";
+	if (key == "whip")
+		return "WHIP";
+	return L("Your server");
+}
+} // namespace
+
+QWidget *MainWindow::buildGoLive()
+{
+	auto *w = new QWidget;
+	auto *col = new QVBoxLayout(w);
+	col->setContentsMargins(0, 0, 0, 0);
+	col->setSpacing(8);
+	m_goLiveRows = new QVBoxLayout;
+	m_goLiveRows->setSpacing(6);
+	col->addLayout(m_goLiveRows);
+	auto *add = button(L("+  Add destination"), "", L("Another platform, landscape or vertical"));
+	auto *manage = button(L("Keys and servers..."), "", L("Settings > Stream"));
+	connect(add, &QPushButton::clicked, this, &MainWindow::addDestinationDialog);
+	connect(manage, &QPushButton::clicked, this, [this] { openSettings(SettingsDialog::Stream); });
+	auto *buttons = new QHBoxLayout;
+	buttons->setSpacing(8);
+	buttons->addWidget(add, 1);
+	buttons->addWidget(manage, 1);
+	col->addLayout(buttons);
+	auto *note = new QLabel(L("Switch platforms on or off any time, even while live. Vertical 9:16 ones get the "
+				  "vertical canvas."));
+	note->setObjectName("hint");
+	note->setWordWrap(true);
+	col->addWidget(note);
+	col->addStretch();
+	refreshGoLive(true);
+	return w;
+}
+
+void MainWindow::refreshGoLive(bool rebuild)
+{
+	if (!m_goLiveRows)
+		return;
+	const QVector<ObsCore::Destination> list = ObsCore::destinations();
+	if (rebuild || m_goLive.size() != list.size() + 1) {
+		while (QLayoutItem *item = m_goLiveRows->takeAt(0)) {
+			delete item->widget();
+			delete item;
+		}
+		m_goLive.clear();
+		auto row = [this](const QString &name, bool vertical, QWidget *trailing) {
+			auto *box = new QWidget;
+			box->setObjectName("tile");
+			box->setAttribute(Qt::WA_StyledBackground);
+			auto *r = new QHBoxLayout(box);
+			r->setContentsMargins(10, 7, 8, 7);
+			r->setSpacing(8);
+			GoLiveRow g;
+			g.dot = new QLabel;
+			g.dot->setFixedSize(10, 10);
+			auto *text = new QVBoxLayout;
+			text->setSpacing(0);
+			auto *title = new QLabel(name);
+			g.status = new QLabel;
+			g.status->setObjectName("mute");
+			text->addWidget(title);
+			text->addWidget(g.status);
+			auto *pill = new QLabel(vertical ? "9:16" : "16:9");
+			pill->setObjectName("pill");
+			r->addWidget(g.dot);
+			r->addLayout(text, 1);
+			r->addWidget(pill);
+			if (trailing)
+				r->addWidget(trailing);
+			box->setMinimumHeight(box->sizeHint().height()); // two lines of text, never clipped
+			m_goLiveRows->addWidget(box);
+			m_goLive << g;
+		};
+		Settings &st = Settings::get();
+		row(platformName(st.value("stream/platform", "twitch").toString()) + L("  (main)"), false, nullptr);
+		for (int i = 0; i < list.size(); i++) {
+			auto *on = new QCheckBox;
+			on->setChecked(list[i].on);
+			on->setToolTip(L("Go live here too"));
+			connect(on, &QCheckBox::toggled, this, [this, i](bool v) {
+				m_core->setDestinationOn(i, v);
+				refreshGoLive(false);
+			});
+			row(list[i].name.isEmpty() ? list[i].server : list[i].name, list[i].vertical, on);
+		}
+	}
+	// the status lights
+	const bool live = m_core->streaming();
+	const QVector<ObsCore::DestinationState> states = m_core->destinationStates();
+	auto paint = [](const GoLiveRow &g, const QString &state, const QString &error, bool wanted) {
+		QColor c = Theme::Line;
+		QString text = wanted ? L("Ready") : L("Off");
+		if (state == "live") {
+			c = Theme::Good;
+			text = L("Live");
+		} else if (state == "connecting") {
+			c = Theme::Warn;
+			text = L("Connecting...");
+		} else if (state == "reconnecting") {
+			c = Theme::Warn;
+			text = L("Reconnecting...");
+		} else if (state == "failed") {
+			c = Theme::Live;
+			text = L("Failed: ") + error;
+		}
+		g.dot->setStyleSheet(QString("background:%1; border-radius:5px;").arg(c.name()));
+		g.status->setText(text);
+		g.status->setToolTip(error);
+	};
+	if (!m_goLive.isEmpty())
+		paint(m_goLive[0], m_core->mainState(), {}, true);
+	for (int i = 0; i < list.size() && i + 1 < m_goLive.size(); i++) {
+		const ObsCore::DestinationState s = i < states.size() ? states[i] : ObsCore::DestinationState{"off", {}};
+		paint(m_goLive[i + 1], live ? s.state : "off", s.error, list[i].on && !list[i].server.trimmed().isEmpty());
+	}
+}
+
+void MainWindow::addDestinationDialog()
+{
+	QDialog dialog(this);
+	dialog.setWindowTitle(L("Add destination"));
+	struct Preset {
+		const char *name, *server;
+		bool vertical;
+	};
+	const Preset presets[] = {{"Twitch", "rtmp://live.twitch.tv/app", false},
+				  {"YouTube", "rtmps://a.rtmps.youtube.com:443/live2", false},
+				  {"YouTube Shorts", "rtmps://a.rtmps.youtube.com:443/live2", true},
+				  {"Kick", "", false},
+				  {"Facebook", "rtmps://live-api-s.facebook.com:443/rtmp/", false},
+				  {"TikTok", "", true},
+				  {"Instagram", "", true},
+				  {"Other", "", false}};
+	auto *platform = new QComboBox;
+	for (const Preset &p : presets)
+		platform->addItem(L(p.name));
+	auto *name = new QLineEdit;
+	auto *server = new QLineEdit;
+	server->setPlaceholderText("rtmp://...  rtmps://...  srt://...");
+	auto *key = new QLineEdit;
+	key->setEchoMode(QLineEdit::Password);
+	auto *picture = new QComboBox;
+	picture->addItem(L("Landscape 16:9"), false);
+	picture->addItem(L("Vertical 9:16"), true);
+	auto pick = [&](int i) {
+		name->setText(L(presets[i].name));
+		server->setText(presets[i].server);
+		picture->setCurrentIndex(presets[i].vertical ? 1 : 0);
+	};
+	connect(platform, &QComboBox::currentIndexChanged, &dialog, pick);
+	pick(0);
+	auto *form = new QFormLayout;
+	form->addRow(L("Platform"), platform);
+	form->addRow(L("Name"), name);
+	form->addRow(L("Server"), server);
+	form->addRow(L("Stream key"), key);
+	form->addRow(L("Picture"), picture);
+	auto *note = new QLabel(L("Kick, TikTok and Instagram show their server address next to the stream key in their "
+				  "live settings. Copy both here."));
+	note->setObjectName("hint");
+	note->setWordWrap(true);
+	form->addRow("", note);
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+	auto *layout = new QVBoxLayout(&dialog);
+	layout->setContentsMargins(18, 18, 18, 18);
+	layout->addLayout(form);
+	layout->addWidget(buttons);
+	dialog.resize(520, 0);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+	if (server->text().trimmed().isEmpty()) {
+		say(L("A destination needs its server address."), true);
+		return;
+	}
+	QVector<ObsCore::Destination> list = ObsCore::destinations();
+	list.append({name->text().trimmed(), server->text().trimmed(), key->text().trimmed(), true, picture->currentData().toBool()});
+	ObsCore::setDestinations(list);
+	if (m_core->streaming())
+		m_core->setDestinationOn(list.size() - 1, true); // starts it now
+	refreshGoLive(true);
+	say(QString(L("%1 added. It goes live with you.")).arg(name->text().trimmed()));
 }
 
 QWidget *MainWindow::buildSession()
@@ -1641,6 +1847,7 @@ void MainWindow::openSettings(int tab)
 		applyHotkeys();
 		applyRemote();
 		updatePreview();
+		refreshGoLive(true);
 	}
 }
 
@@ -1684,6 +1891,7 @@ void MainWindow::tick()
 	m_liveTime->setText(live ? clock(m_liveSince) : "00:00:00");
 	m_tune->setText(live ? QString(L("Live for %1. Click to end the stream.")).arg(clock(m_liveSince)) : tune);
 	m_recTime->setText(rec ? (m_core->recordingPaused() ? L("Paused") : clock(m_recSince)) : "00:00:00");
+	refreshGoLive(false);
 	m_liveTime->setProperty("on", live);
 	m_recTime->setProperty("on", rec);
 	restyle(m_liveTime);
@@ -2507,13 +2715,10 @@ void MainWindow::verticalSettings()
 	size->setCurrentIndex(m_core->verticalSize().width() == 720 ? 1 : 0);
 	auto *record = new QCheckBox(L("Record it too, next to every recording"));
 	record->setChecked(st.value("vertical/record", true).toBool());
-	auto *stream = new QCheckBox(L("Stream it too, while you're live"));
-	stream->setChecked(st.value("vertical/stream", false).toBool());
-	auto *server = new QLineEdit(st.value("vertical/server").toString());
-	server->setPlaceholderText("rtmp://... (YouTube: rtmps://a.rtmps.youtube.com:443/live2)");
-	auto *key = new QLineEdit(st.secret("vertical/key"));
-	key->setEchoMode(QLineEdit::Password);
-	key->setPlaceholderText(L("Stream key for the vertical stream"));
+	auto *where = new QLabel(L("Where it goes live: add a Vertical 9:16 destination in the Go Live to panel "
+				 "(YouTube Shorts, TikTok, Instagram...). It can go to several at once."));
+	where->setObjectName("hint");
+	where->setWordWrap(true);
 	auto *bitrate = new QSpinBox;
 	bitrate->setRange(1000, 20000);
 	bitrate->setSingleStep(500);
@@ -2522,9 +2727,7 @@ void MainWindow::verticalSettings()
 	auto *form = new QFormLayout;
 	form->addRow(L("Size"), size);
 	form->addRow("", record);
-	form->addRow("", stream);
-	form->addRow(L("Server"), server);
-	form->addRow(L("Stream key"), key);
+	form->addRow("", where);
 	form->addRow(L("Bitrate"), bitrate);
 	auto *note = new QLabel(L("The vertical picture is encoded separately, so it costs a second encode (easy for a "
 				"graphics card encoder, heavy for x264). YouTube takes vertical live streams as Shorts."));
@@ -2544,9 +2747,6 @@ void MainWindow::verticalSettings()
 	const bool resized = size->currentData().toString() != st.value("vertical/size").toString() && st.has("vertical/size");
 	st.set("vertical/size", size->currentData());
 	st.set("vertical/record", record->isChecked());
-	st.set("vertical/stream", stream->isChecked());
-	st.set("vertical/server", server->text().trimmed());
-	st.setSecret("vertical/key", key->text().trimmed());
 	st.set("vertical/bitrate", bitrate->value());
 	m_core->outputSettingsChanged();
 	if (resized)

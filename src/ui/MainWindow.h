@@ -24,6 +24,7 @@ class QPushButton;
 class QSpinBox;
 class QStackedWidget;
 class QTimer;
+class QVBoxLayout;
 
 class MainWindow : public QMainWindow {
 	Q_OBJECT
@@ -38,6 +39,7 @@ public:
 	static bool simple();                     // Simple mode: only what's needed to go live and record
 	bool selftestDocks();                     // --selftest-docks: move, float, hide, save, restore, reset, lock
 	int dockArea(const QString &id);           // for self-tests: where a dock sits (Qt::DockWidgetArea)
+	void raiseDock(const QString &id);         // brings a tabbed dock to the front (--demo-dock, screenshots)
 	void setSimple(bool on);
 
 protected:
@@ -52,6 +54,9 @@ private:
 	QWidget *buildTransitions();
 	QWidget *buildControls();
 	QWidget *buildSession();
+	QWidget *buildGoLive();                  // Go Live to: every destination with a switch and a status light
+	void refreshGoLive(bool rebuild);
+	void addDestinationDialog();
 	QWidget *buildUpdateBar();
 	// docks: every panel can be dragged, floated, tabbed together, resized and closed, like OBS
 	QDockWidget *addDock(const QString &id, const QString &title, QWidget *content, Qt::DockWidgetArea area, bool pro = false);
@@ -152,6 +157,11 @@ private:
 	QPushButton *m_hero = nullptr;      // the Go Live card
 	QLabel *m_slogan = nullptr;
 	QByteArray m_savedDocks;           // what was last written, so the layout is saved only when it changes
+	struct GoLiveRow {
+		QLabel *dot = nullptr, *status = nullptr;
+	};
+	QVBoxLayout *m_goLiveRows = nullptr;
+	QVector<GoLiveRow> m_goLive; // [0] is the main stream, then destinations() in order
 	QList<QDockWidget *> m_docks;
 	QByteArray m_defaultDocks;
 	QElapsedTimer m_recSince;

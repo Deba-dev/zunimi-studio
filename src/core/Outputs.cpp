@@ -379,7 +379,7 @@ QVector<ObsCore::Destination> ObsCore::destinations()
 	for (int i = 0; i < arr.size(); i++) {
 		const QJsonObject o = arr[i].toObject();
 		list.append({o.value("name").toString(), o.value("server").toString(), st.secret(QString("multistream/key%1").arg(i)),
-			     o.value("on").toBool(true)});
+			     o.value("on").toBool(true), o.value("vertical").toBool(false)});
 	}
 	return list;
 }
@@ -389,21 +389,60 @@ void ObsCore::setDestinations(const QVector<Destination> &list)
 	Settings &st = Settings::get();
 	QJsonArray arr;
 	for (int i = 0; i < list.size(); i++) {
-		arr.append(QJsonObject{{"name", list[i].name}, {"server", list[i].server}, {"on", list[i].on}});
+		arr.append(QJsonObject{{"name", list[i].name}, {"server", list[i].server}, {"on", list[i].on}, {"vertical", list[i].vertical}});
 		st.setSecret(QString("multistream/key%1").arg(i), list[i].key);
 	}
 	st.set("multistream/list", QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
+void ObsCore::moveOldVerticalStream()
+{
+	Settings &st = Settings::get();
+	const QString server = st.value("vertical/server").toString().trimmed();
+	if (server.isEmpty())
+		return;
+	QVector<Destination> list = destinations();
+	list.append({L("Vertical"), server, st.secret("vertical/key"), st.value("vertical/stream", false).toBool(), true});
+	setDestinations(list);
+	st.set("vertical/server", QString());
+	st.setSecret("vertical/key", QString());
+	st.set("vertical/stream", false);
+}
+
 void ObsCore::startExtras()
 {
 	stopExtras();
+	const QVector<Destination> list = destinations();
+	for (int i = 0; i < list.size(); i++)
+		if (list[i].on && !list[i].server.trimmed().isEmpty())
+			startExtra(i, list[i]);
+}
+
+void ObsCore::startExtra(int index, const Destination &d)
+{
+	stopExtra(index);
 	const int track = std::clamp(Settings::get().value("stream/track", 1).toInt(), 1, 6) - 1;
-	for (const Destination &d : destinations()) {
-		if (!d.on || d.server.trimmed().isEmpty())
-			continue;
+	{
 		Extra e;
+		e.index = index;
 		e.name = d.name.isEmpty() ? d.server : d.name;
+		obs_encoder_t *video = m_video;
+		if (d.vertical) {
+			// the 9:16 picture: the vertical canvas switches itself on when a vertical destination goes live
+			QString why;
+			if (!m_vcanvas && !setVertical(true, &why))
+				e.error = why;
+			else if (!ensureVerticalEncoder(&why))
+				e.error = why;
+			video = e.error.isEmpty() ? m_vvideo : nullptr;
+			if (!video) {
+				if (e.error.isEmpty())
+					e.error = L("the vertical canvas isn't ready");
+				emit problem(QString(L("Multistream to %1 didn't start: %2")).arg(e.name, e.error));
+				m_extras << e;
+				return;
+			}
+		}
 		obs_data_t *s = obs_data_create();
 		obs_data_set_string(s, "server", d.server.trimmed().toUtf8().constData());
 		obs_data_set_string(s, "key", d.key.trimmed().toUtf8().constData());
@@ -417,7 +456,7 @@ void ObsCore::startExtras()
 		} else {
 			obs_output_set_reconnect_settings(e.output, 20, 3);
 			obs_output_set_service(e.output, e.service);
-			obs_output_set_video_encoder(e.output, m_video);
+			obs_output_set_video_encoder(e.output, video);
 			obs_output_set_audio_encoder(e.output, m_audio[track], 0);
 			if (!obs_output_start(e.output)) {
 				const char *why = obs_output_get_last_error(e.output);
@@ -427,6 +466,68 @@ void ObsCore::startExtras()
 		}
 		m_extras << e;
 	}
+}
+
+void ObsCore::stopExtra(int index)
+{
+	for (int i = m_extras.size() - 1; i >= 0; i--) {
+		Extra &e = m_extras[i];
+		if (e.index != index)
+			continue;
+		if (e.output) {
+			if (obs_output_active(e.output))
+				obs_output_stop(e.output);
+			obs_output_release(e.output);
+		}
+		if (e.service)
+			obs_service_release(e.service);
+		m_extras.removeAt(i);
+	}
+}
+
+QVector<ObsCore::DestinationState> ObsCore::destinationStates() const
+{
+	const QVector<Destination> list = destinations();
+	QVector<DestinationState> out(list.size(), {"off", {}});
+	for (const Extra &e : m_extras) {
+		if (e.index < 0 || e.index >= out.size())
+			continue;
+		DestinationState &s = out[e.index];
+		s.error = e.error;
+		if (!e.error.isEmpty() || !e.output)
+			s.state = "failed";
+		else if (obs_output_reconnecting(e.output))
+			s.state = "reconnecting";
+		else if (obs_output_active(e.output))
+			s.state = "live";
+		else
+			s.state = "connecting";
+	}
+	return out;
+}
+
+QString ObsCore::mainState() const
+{
+	if (!m_stream)
+		return "off";
+	if (obs_output_reconnecting(m_stream))
+		return "reconnecting";
+	return obs_output_active(m_stream) ? "live" : "off";
+}
+
+void ObsCore::setDestinationOn(int index, bool on)
+{
+	QVector<Destination> list = destinations();
+	if (index < 0 || index >= list.size())
+		return;
+	list[index].on = on;
+	setDestinations(list);
+	if (!streaming())
+		return;
+	if (on && !list[index].server.trimmed().isEmpty())
+		startExtra(index, list[index]);
+	else
+		stopExtra(index);
 }
 
 void ObsCore::stopExtras()

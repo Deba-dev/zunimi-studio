@@ -199,9 +199,19 @@ public:
 	struct Destination {
 		QString name, server, key;
 		bool on = true;
+		bool vertical = false; // sends the 9:16 picture (the vertical canvas) instead of the 16:9 one
 	};
 	static QVector<Destination> destinations();
 	static void setDestinations(const QVector<Destination> &list);
+	static void moveOldVerticalStream(); // the vertical canvas's own server/key (before 0.5.1) becomes a destination
+	// What the Go Live to panel shows for each destination, in list order
+	struct DestinationState {
+		QString state; // "off", "connecting", "live", "reconnecting", "failed"
+		QString error;
+	};
+	QVector<DestinationState> destinationStates() const;
+	QString mainState() const;
+	void setDestinationOn(int index, bool on); // saved; while live it also starts or stops just that one
 	QStringList extraStatus() const; // "YouTube: live", "Kick: failed (...)"
 	bool startRecording(const QString &folder, QString *error);
 	void stopRecording();
@@ -326,6 +336,7 @@ private:
 	obs_output_t *m_vcam = nullptr;
 	obs_encoder_t *m_opus = nullptr;          // WHIP (WebRTC) needs Opus audio
 	struct Extra {
+		int index = -1; // in destinations()
 		QString name;
 		obs_service_t *service = nullptr;
 		obs_output_t *output = nullptr;
@@ -341,6 +352,8 @@ private:
 	obs_service_t *m_vservice = nullptr;
 	void startExtras();
 	void stopExtras();
+	void startExtra(int index, const Destination &d);
+	void stopExtra(int index);
 	QString m_recordPath;
 	qint64 m_streamStart = 0, m_recordStart = 0;
 

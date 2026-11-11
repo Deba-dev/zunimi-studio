@@ -665,6 +665,46 @@ int main(int argc, char *argv[])
 				QTimer::singleShot(3500, &core, [&core] { core.screenshot(Settings::dataDir() + "/selftest"); });
 			});
 		}
+		if (app.arguments().contains("--demo-dock")) {
+			const QString id = app.arguments().value(app.arguments().indexOf("--demo-dock") + 1);
+			QTimer::singleShot(800, &app, [&window, id] { window.raiseDock(id); });
+		}
+		if (app.arguments().contains("--selftest-multistream")) {
+			// Goes live to three local RTMP servers at once (ports 1935-1937, e.g. ffmpeg -listen 1): the main stream, a
+			// landscape destination and a vertical one. Checks each goes live, the vertical canvas switches itself on, and
+			// one destination can be switched off and on again while live.
+			auto check = [](bool ok, const QString &what) {
+				blog(ok ? LOG_INFO : LOG_ERROR, "selftest multistream: %s %s", ok ? "ok  " : "FAIL", what.toUtf8().constData());
+				return ok;
+			};
+			ObsCore::setDestinations({{"Local B", "rtmp://127.0.0.1:1936/live", "b", true, false},
+						  {"Local Shorts", "rtmp://127.0.0.1:1937/live", "c", true, true}});
+			QTimer::singleShot(1500, &app, [&core, &window, check] {
+				core.addSource("monitor_capture", "Screen", nullptr, ObsCore::Fit::Fill);
+				QString err;
+				if (!check(core.startStream("rtmp://127.0.0.1:1935/live", "a", &err), "main stream starts " + err))
+					return;
+				QTimer::singleShot(7000, &core, [&core, &window, check] {
+					auto states = core.destinationStates();
+					bool all = check(core.mainState() == "live", "main stream live");
+					all &= check(states.size() == 2 && states[0].state == "live", "landscape destination live (" + (states.isEmpty() ? QString() : states[0].state + " " + states[0].error) + ")");
+					all &= check(states.size() == 2 && states[1].state == "live", "vertical destination live (" + (states.size() < 2 ? QString() : states[1].state + " " + states[1].error) + ")");
+					all &= check(core.verticalOn(), "the vertical canvas switched itself on");
+					core.setDestinationOn(0, false);
+					states = core.destinationStates();
+					all &= check(states[0].state == "off" && states[1].state == "live" && core.mainState() == "live",
+						     "switching one off while live leaves the others live");
+					core.setDestinationOn(0, true);
+					QTimer::singleShot(4000, &core, [&core, &window, check, all]() mutable {
+						const auto again = core.destinationStates();
+						all &= check(again[0].state == "live", "and it goes live again when switched back on (" + again[0].state + " " + again[0].error + ")");
+						core.stopStream();
+						blog(LOG_INFO, "selftest multistream: %s", all ? "all passed" : "SOME FAILED");
+						QTimer::singleShot(3000, [&window] { window.modes()->quit(false); });
+					});
+				});
+			});
+		}
 		if (app.arguments().contains("--selftest-captureprops")) {
 			// Records while opening a Window capture's options and switching its window over and over, the way a
 			// live crash happened on 2026-11-11 (d3d11 access violation). Passing means it survives 15 seconds.
