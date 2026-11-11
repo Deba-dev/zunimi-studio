@@ -604,6 +604,24 @@ void ObsCore::moveScene(const QString &name, bool up)
 	push(L("Move scene"), [this, name, up] { moveScene(name, !up); }, [this, name, up] { moveScene(name, up); });
 }
 
+void ObsCore::setSceneOrder(const QStringList &names)
+{
+	const QStringList before = scenes();
+	if (names == before || names.size() != before.size())
+		return;
+	QVector<obs_source_t *> order;
+	for (const QString &n : names) {
+		obs_source_t *source = sceneSource(n);
+		if (!source || order.contains(source))
+			return;
+		order << source;
+	}
+	m_scenes = order;
+	save();
+	emit scenesChanged();
+	push(L("Move scene"), [this, before] { setSceneOrder(before); }, [this, names] { setSceneOrder(names); });
+}
+
 void ObsCore::setTransition(const QString &id, int ms)
 {
 	m_transitionMs = std::clamp(ms, 0, 20000);
@@ -1060,6 +1078,26 @@ void ObsCore::moveSourceTo(const QString &name, int indexFromTop)
 	const int count = int(items().size());
 	beginEdit(L("Move"));
 	obs_sceneitem_set_order_position(it, std::clamp(count - 1 - indexFromTop, 0, count - 1));
+	endEdit();
+	emit sceneChanged();
+}
+
+void ObsCore::setSourceOrder(const QStringList &siblingsTopFirst)
+{
+	const int n = int(siblingsTopFirst.size());
+	QVector<obs_sceneitem_t *> list;
+	for (const QString &name : siblingsTopFirst) {
+		obs_sceneitem_t *it = item(name);
+		if (!it || (!list.isEmpty() && obs_sceneitem_get_scene(it) != obs_sceneitem_get_scene(list.first())))
+			return; // not side by side
+		list << it;
+	}
+	if (list.isEmpty())
+		return;
+	beginEdit(L("Move"));
+	// placing each one at the bottom in turn, from the top one down, leaves them in exactly this order
+	for (int i = 0; i < n; i++)
+		obs_sceneitem_set_order(list[i], OBS_ORDER_MOVE_BOTTOM);
 	endEdit();
 	emit sceneChanged();
 }

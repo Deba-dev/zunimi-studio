@@ -778,6 +778,12 @@ int main(int argc, char *argv[])
 				window.selftestOptions(qEnvironmentVariable("ZUNIMI_TEST_MEDIA").split('|', Qt::SkipEmptyParts));
 			});
 		}
+		if (app.arguments().contains("--selftest-drag")) {
+			QTimer::singleShot(1500, &app, [&window] {
+				window.selftestDrag();
+				QTimer::singleShot(300, [&window] { window.modes()->quit(false); });
+			});
+		}
 		if (app.arguments().contains("--selftest-docks")) {
 			// Then waits for the auto-save and ends the app abruptly, as a crash would; --selftest-docks-reopen
 			// (next run, same data folder) checks the moved dock came back.

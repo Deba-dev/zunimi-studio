@@ -37,6 +37,7 @@ public:
 	void runSetup();                          // the first-time setup (also from Menu)
 	void applySetup(const SetupChoices &c);
 	static bool simple();                     // Simple mode: only what's needed to go live and record
+	bool selftestDrag();                      // --selftest-drag: Go Live to in Controls, drag scenes and sources
 	bool selftestDocks();                     // --selftest-docks: move, float, hide, save, restore, reset, lock
 	void selftestMedia(const QStringList &files); // --selftest-media: every option on a media file, clicked
 	void selftestOptions(const QStringList &files); // --selftest-options: every source kind, every option widget
@@ -58,6 +59,8 @@ private:
 	QWidget *buildSession();
 	QWidget *buildGoLive();                  // Go Live to: every destination with a switch and a status light
 	void refreshGoLive(bool rebuild);
+	void tallControls();    // Controls as tall as it can be, Stats just its tiles
+	void applySourceDrag(); // the Sources list was reordered by dragging
 	void addDestinationDialog();
 	void pickYouTubeStream();                // sign in to YouTube and pick a scheduled stream
 	QWidget *buildUpdateBar();
@@ -147,6 +150,7 @@ private:
 	QComboBox *m_transition = nullptr;
 	QSpinBox *m_transitionMs = nullptr;
 	QListWidget *m_sources = nullptr;
+	bool m_sourceDropQueued = false;
 	QLabel *m_empty = nullptr;
 	Mixer *m_mixer = nullptr;
 	QLabel *m_health = nullptr;

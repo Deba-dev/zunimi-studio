@@ -53,6 +53,8 @@
 #include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QShortcut>
@@ -199,9 +201,8 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	splitDockWidget(controls, session, Qt::Vertical);
 	QDockWidget *chatDock = addDock("chat", L("Chat"), chat, Qt::RightDockWidgetArea);
 	QDockWidget *eventsDock = addDock("events", L("Events"), events, Qt::RightDockWidgetArea, true);
-	QDockWidget *goLive = addDock("golive", L("Go Live to"), buildGoLive(), Qt::RightDockWidgetArea);
-	tabifyDockWidget(session, goLive);
-	tabifyDockWidget(goLive, chatDock);
+	// Go Live to (every destination) lives in the Controls dock under Start Streaming; there is no separate dock.
+	tabifyDockWidget(session, chatDock);
 	tabifyDockWidget(chatDock, eventsDock);
 	session->raise();
 	QDockWidget *mixer = addDock("mixer", L("Audio Mixer"), m_mixer, Qt::BottomDockWidgetArea);
@@ -209,8 +210,7 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 	splitDockWidget(mixer, transitions, Qt::Horizontal);
 	resizeDocks({scenes, sources}, {220, 380}, Qt::Vertical);
 	resizeDocks({scenes, controls}, {280, 300}, Qt::Horizontal);
-	resizeDocks({controls, session}, {470, 300}, Qt::Vertical);
-	resizeDocks({mixer, transitions}, {700, 280}, Qt::Horizontal);
+		resizeDocks({mixer, transitions}, {700, 280}, Qt::Horizontal);
 	resizeDocks({mixer}, {200}, Qt::Vertical);
 	buildMenuBar();
 	m_defaultDocks = saveState(DOCKS_VERSION);
@@ -222,6 +222,17 @@ MainWindow::MainWindow(ObsCore *core) : m_core(core)
 			restoreState(saved, DOCKS_VERSION);
 		m_savedDocks = saved.isEmpty() ? m_defaultDocks : saved;
 		setDocksLocked(st.value("docks/locked", false).toBool());
+		// Dock sizes only stick once the window is on screen. Stats gets just its tiles and Controls (which holds
+		// Go Live to since 0.5.3) the rest: for a new layout, and once for a layout saved by an older version.
+		const bool fresh = saved.isEmpty();
+		const bool once = !st.value("docks/controlsTall", false).toBool();
+		QTimer::singleShot(200, this, [this, fresh, once] {
+			if (fresh || once)
+				tallControls();
+			if (fresh)
+				m_defaultDocks = saveState(DOCKS_VERSION); // Reset docks brings back these sizes
+			Settings::get().set("docks/controlsTall", true);
+		});
 	}
 	connect(qApp, &QCoreApplication::aboutToQuit, this, &MainWindow::saveDocks);
 	// also every few seconds when it changed: a crash or a forced close must not lose the layout
@@ -560,6 +571,15 @@ void MainWindow::fillDocksMenu(QMenu *menu)
 	menu->addAction(L("Reset docks"), this, &MainWindow::resetDocks);
 }
 
+void MainWindow::tallControls()
+{
+	QDockWidget *controls = findChild<QDockWidget *>("dock_controls"), *session = findChild<QDockWidget *>("dock_session");
+	if (!controls || !session || controls->isFloating() || session->isFloating() || !session->toggleViewAction()->isChecked() ||
+	    dockWidgetArea(controls) != dockWidgetArea(session))
+		return; // the user put them somewhere else
+	resizeDocks({controls, session}, {10000, 1}, Qt::Vertical); // each is held to its smallest size
+}
+
 void MainWindow::resetDocks()
 {
 	setFullHeightDocks(true);
@@ -598,6 +618,63 @@ void MainWindow::saveDocks()
 	Settings::get().set("docks/state", QString::fromLatin1(m_savedDocks.toBase64()));
 }
 
+bool MainWindow::selftestDrag()
+{
+	bool all = true;
+	auto check = [&all](bool ok, const QString &what) {
+		all &= ok;
+		blog(ok ? LOG_INFO : LOG_ERROR, "selftest drag: %s %s", ok ? "ok  " : "FAIL", what.toUtf8().constData());
+	};
+	// Go Live to sits in the Controls dock, not in a dock of its own
+	check(!findChild<QDockWidget *>("dock_golive"), "no separate Go Live to dock");
+	QDockWidget *controls = findChild<QDockWidget *>("dock_controls");
+	check(controls && m_goLiveRows && controls->isAncestorOf(m_goLiveRows->parentWidget()), "Go Live to is inside Controls");
+
+	// scenes: drag the last one to the top, as a drop does (the list model moves the row)
+	const QString a = m_core->addScene("Drag A"), b = m_core->addScene("Drag B");
+	QApplication::processEvents();
+	const int last = m_scenes->count() - 1;
+	check(m_scenes->item(last)->data(Qt::UserRole).toString() == b, "new scene is last in the list");
+	m_scenes->model()->moveRow(QModelIndex(), last, QModelIndex(), 0);
+	for (int i = 0; i < 5; i++)
+		QApplication::processEvents();
+	check(m_core->scenes().value(0) == b, "dragged scene is first: " + m_core->scenes().join(", "));
+	check(m_scenes->item(0)->data(Qt::UserRole).toString() == b, "list shows it first too");
+	m_core->undo();
+	check(m_core->scenes().value(0) != b, "undo puts the scene back");
+
+	// sources: three on one scene, drag the bottom one (behind) to the top (in front)
+	m_core->setScene(a);
+	for (const char *n : {"Drag 1", "Drag 2", "Drag 3"}) {
+		obs_data_t *st = obs_data_create();
+		obs_data_set_int(st, "width", 100);
+		obs_data_set_int(st, "height", 100);
+		m_core->addSource("color_source_v3", n, st, ObsCore::Fit::Fill); // the scene keeps it; not ours to release
+		obs_data_release(st);
+	}
+	QApplication::processEvents();
+	auto names = [this] {
+		QStringList l;
+		for (const SceneItem &it : m_core->items())
+			l << it.name;
+		return l;
+	};
+	check(names() == QStringList({"Drag 3", "Drag 2", "Drag 1"}), "newest source is in front: " + names().join(", "));
+	m_sources->model()->moveRow(QModelIndex(), 2, QModelIndex(), 0);
+	for (int i = 0; i < 5; i++)
+		QApplication::processEvents();
+	check(names() == QStringList({"Drag 1", "Drag 3", "Drag 2"}), "dragged source is in front: " + names().join(", "));
+	check(m_sources->item(0)->data(Qt::UserRole).toString() == "Drag 1", "list shows it on top too");
+	m_sources->model()->moveRow(QModelIndex(), 0, QModelIndex(), 3); // to the bottom
+	for (int i = 0; i < 5; i++)
+		QApplication::processEvents();
+	check(names() == QStringList({"Drag 3", "Drag 2", "Drag 1"}), "dragged to the bottom: " + names().join(", "));
+	m_core->undo();
+	check(names() == QStringList({"Drag 1", "Drag 3", "Drag 2"}), "undo restores the order: " + names().join(", "));
+	blog(LOG_INFO, "selftest drag: %s", all ? "all passed" : "SOME FAILED");
+	return all;
+}
+
 bool MainWindow::selftestDocks()
 {
 	bool all = true;
@@ -607,7 +684,7 @@ bool MainWindow::selftestDocks()
 	};
 	auto dock = [this](const char *id) { return findChild<QDockWidget *>(QString("dock_") + id); };
 	const auto free = QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable;
-	check(m_docks.size() == 9, QString("%1 docks").arg(m_docks.size()));
+	check(m_docks.size() == 8, QString("%1 docks").arg(m_docks.size()));
 	for (QDockWidget *d : m_docks)
 		check((d->features() & free) == free, d->windowTitle() + " can be moved, floated and closed");
 	QDockWidget *mixer = dock("mixer"), *transitions = dock("transitions"), *events = dock("events"), *scenes = dock("scenes");
@@ -996,8 +1073,20 @@ QWidget *MainWindow::buildScenes()
 	col->setContentsMargins(0, 0, 0, 0);
 	col->setSpacing(8);
 	m_scenes = new QListWidget;
-	m_scenes->setToolTip(L("Click to switch. Double-click to rename. Hotkeys for scenes 1-9 are in Settings > Hotkeys."));
+	m_scenes->setToolTip(L("Click to switch. Drag to reorder. Double-click to rename. Hotkeys for scenes 1-9 are in Settings > Hotkeys."));
 	m_scenes->setMinimumHeight(90);
+	m_scenes->setDragDropMode(QAbstractItemView::InternalMove);
+	m_scenes->setDefaultDropAction(Qt::MoveAction);
+	// after a drop, the list's new order becomes the scenes' order (later, so the list isn't rebuilt mid-drop)
+	connect(m_scenes->model(), &QAbstractItemModel::rowsMoved, this, [this] {
+		QTimer::singleShot(0, this, [this] {
+			QStringList names;
+			for (int i = 0; i < m_scenes->count(); i++)
+				names << m_scenes->item(i)->data(Qt::UserRole).toString();
+			m_core->setSceneOrder(names);
+			refreshScenes(); // also when nothing changed, so the list matches again
+		});
+	});
 	auto *add = button("+", "icon", L("New scene"));
 	auto *copy = button("⧉", "icon", L("Duplicate this scene (sources are shared)"));
 	auto *rename = button("✎", "icon", L("Rename"));
@@ -1066,7 +1155,18 @@ QWidget *MainWindow::buildSources()
 	col->setContentsMargins(0, 0, 0, 0);
 	col->setSpacing(8);
 	m_sources = new QListWidget;
-	m_sources->setToolTip(L("Tick to show or hide. Double-click for its options. Right-click for more."));
+	m_sources->setToolTip(L("Tick to show or hide. Drag to put in front or behind. Double-click for its options. Right-click for more."));
+	m_sources->setDragDropMode(QAbstractItemView::InternalMove);
+	m_sources->setDefaultDropAction(Qt::MoveAction);
+	connect(m_sources->model(), &QAbstractItemModel::rowsMoved, this, [this] {
+		if (m_sourceDropQueued) // several selected sources move one by one; apply them once
+			return;
+		m_sourceDropQueued = true;
+		QTimer::singleShot(0, this, [this] {
+			m_sourceDropQueued = false;
+			applySourceDrag();
+		});
+	});
 	m_sources->setContextMenuPolicy(Qt::CustomContextMenu);
 	m_sources->setSelectionMode(QAbstractItemView::ExtendedSelection); // Ctrl/Shift-click several to group them
 	m_empty = new QLabel(L("Nothing here yet.\nAdd a Game or your Screen to start."));
@@ -1340,6 +1440,12 @@ QWidget *MainWindow::buildControls()
 	connect(settings, &QPushButton::clicked, this, [this] { openSettings(); });
 	connect(exit, &QPushButton::clicked, m_modes, [this] { m_modes->quit(); });
 	col->addWidget(m_live);
+	auto *goLiveTitle = new QLabel(L("Go Live to"));
+	goLiveTitle->setObjectName("h");
+	col->addSpacing(2);
+	col->addWidget(goLiveTitle);
+	col->addWidget(buildGoLive());
+	col->addSpacing(4);
 	auto *recRow = new QHBoxLayout;
 	recRow->setSpacing(8);
 	recRow->addWidget(m_rec, 1);
@@ -1380,11 +1486,21 @@ QWidget *MainWindow::buildControls()
 	col->addSpacing(4);
 	col->addWidget(m_hero);
 	col->addStretch();
+	// Go Live to grows with every destination, so the dock scrolls instead of clipping the buttons or the card
 	auto *w = new QWidget;
+	w->setObjectName("clearInner");
+	col->setContentsMargins(0, 0, 4, 0);
 	w->setLayout(col);
-	w->setMinimumWidth(250);
-	w->setMinimumHeight(w->sizeHint().height()); // the dock can't be squeezed until the card disappears
-	return w;
+	auto *area = new QScrollArea;
+	area->setObjectName("clear");
+	area->setWidgetResizable(true);
+	area->setFrameShape(QFrame::NoFrame);
+	area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	area->setWidget(w);
+	// never narrower than its buttons (there is no sideways scrolling), with room for the scroll bar
+	area->setMinimumWidth(std::max(260, w->minimumSizeHint().width() + area->verticalScrollBar()->sizeHint().width() + 6));
+	area->setMinimumHeight(200);
+	return area;
 }
 
 namespace {
@@ -1425,7 +1541,6 @@ QWidget *MainWindow::buildGoLive()
 	note->setObjectName("hint");
 	note->setWordWrap(true);
 	col->addWidget(note);
-	col->addStretch();
 	refreshGoLive(true);
 	return w;
 }
@@ -1749,6 +1864,35 @@ void MainWindow::refreshSources()
 	m_sources->setVisible(!empty);
 	m_empty->setVisible(empty);
 	m_preview->select(selectedSource());
+}
+
+// The Sources list after a drag, top first: each set of sources side by side (the scene's own, or one group's)
+// takes the order it now has in the list. A source only moves among its neighbours, never into or out of a group.
+void MainWindow::applySourceDrag()
+{
+	QHash<QString, QString> groupOf;
+	QHash<QString, QStringList> was;
+	for (const SceneItem &item : m_core->items()) {
+		groupOf.insert(item.name, item.group);
+		was[item.group] << item.name;
+	}
+	QHash<QString, QStringList> now;
+	QStringList groups;
+	for (int i = 0; i < m_sources->count(); i++) {
+		const QString name = m_sources->item(i)->data(Qt::UserRole).toString();
+		if (!groupOf.contains(name))
+			continue;
+		const QString g = groupOf.value(name);
+		if (!groups.contains(g))
+			groups << g;
+		now[g] << name;
+	}
+	for (const QString &g : groups)
+		if (now[g] != was[g] && now[g].size() == was[g].size())
+			m_core->setSourceOrder(now[g]);
+	const QString keep = selectedSource();
+	refreshSources(); // also when nothing changed, so the list matches the scene again
+	selectSource(keep);
 }
 
 void MainWindow::addScreen(const QString &id, const QString &label)

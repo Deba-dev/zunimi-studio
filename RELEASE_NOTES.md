@@ -1,3 +1,20 @@
+## Zunimi Stream+ 0.5.3 (preview)
+
+Drag your scenes and sources, and Go Live to sits right under Start Streaming.
+
+**Install:** download **ZunimiStudio-Setup.exe** below and run it. Already on 0.5? The app offers this update by itself. If Windows SmartScreen warns you, click **More info > Run anyway** (the installer isn't code-signed yet).
+
+### Drag and drop
+- **Scenes:** drag a scene up or down to change the order. Scene hotkeys 1-9 follow the new order.
+- **Sources:** drag a source higher to put it in front, lower to put it behind. You can drag several selected sources at once. A source moves among its neighbours; use right-click > Group to put it in a group.
+- **Ctrl+Z** undoes a drag. The ↑ ↓ buttons still work.
+
+### Controls
+- **Go Live to** (every platform, with its switch and status light, plus Add destination) is now inside the **Controls** dock, under Start Streaming, instead of a tab of its own.
+- The Controls dock scrolls when it is short, so no button is ever cut off. **Stats** takes just the room its tiles need, so Controls gets more. If you had your own layout, this happens once and the rest of your layout stays.
+- Chat and Events can be made shorter than before.
+- All of it in Hindi too.
+
 ## Zunimi Stream+ 0.5.2 (preview)
 
 Sign in with YouTube is switched on.

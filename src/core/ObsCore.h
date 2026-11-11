@@ -100,6 +100,7 @@ public:
 	bool renameScene(const QString &from, const QString &to);
 	bool removeScene(const QString &name); // the last scene always stays
 	void moveScene(const QString &name, bool up);
+	void setSceneOrder(const QStringList &names); // dragged in the Scenes list; must be every scene
 	void setTransition(const QString &id, int ms);
 	QString transitionId() const { return m_transitionId; }
 	int transitionMs() const { return m_transitionMs; }
@@ -132,6 +133,9 @@ public:
 	void setLocked(const QString &name, bool locked);
 	void moveSource(const QString &name, bool up);
 	void moveSourceTo(const QString &name, int indexFromTop);
+	// Dragged in the Sources list: sources that sit side by side (the scene's top level, or one group's
+	// sources), top first. One undo step.
+	void setSourceOrder(const QStringList &siblingsTopFirst);
 	void fit(const QString &name, Fit fit);
 	void place(obs_sceneitem_t *item, const QRectF &box); // fits the item inside box, keeping its shape
 	void save();

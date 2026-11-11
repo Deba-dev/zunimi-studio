@@ -56,11 +56,12 @@ QLabel *muted(const QString &text)
 ChatPanel::ChatPanel(QWidget *parent) : QWidget(parent)
 {
 	auto *col = new QVBoxLayout(this);
-	col->setContentsMargins(12, 12, 12, 12);
-	col->setSpacing(8);
+	col->setContentsMargins(4, 4, 4, 4);
+	col->setSpacing(6);
 	m_view = new QTextBrowser;
 	m_view->setOpenExternalLinks(false);
 	m_view->setStyleSheet("QTextBrowser { background: transparent; border: none; }");
+	m_view->setMinimumHeight(24); // the tab it shares with Stats can stay small; it grows when there is room
 	m_status = muted({});
 	auto *setup = new QPushButton(L("Connect chat..."));
 	connect(setup, &QPushButton::clicked, this, &ChatPanel::setupRequested);
@@ -121,10 +122,11 @@ void ChatPanel::send()
 EventsPanel::EventsPanel(QWidget *parent) : QWidget(parent)
 {
 	auto *col = new QVBoxLayout(this);
-	col->setContentsMargins(12, 12, 12, 12);
-	col->setSpacing(8);
+	col->setContentsMargins(4, 4, 4, 4);
+	col->setSpacing(6);
 	m_list = new QListWidget;
 	m_list->setToolTip(L("Double-click an event to show its alert again"));
+	m_list->setMinimumHeight(24);
 	m_status = muted({});
 	auto *test = new QPushButton(L("Test an alert"));
 	auto *menu = new QMenu(test);
