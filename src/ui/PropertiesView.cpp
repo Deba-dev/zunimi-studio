@@ -2,6 +2,7 @@
 #include "core/I18n.h"
 
 #include <QCheckBox>
+#include <cstring>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -120,7 +121,14 @@ void PropertiesView::rebuild()
 	m_props = nullptr;
 	if (!m_source)
 		return;
-	m_props = obs_source_properties(m_source);
+	// Capture sources hand their running capture to the option callbacks, which then change it from this (UI) thread
+	// while the video thread is using it: opening or changing a Window capture's options while live crashed in the
+	// graphics driver (d3d11, 2026-11-11). Built for the source type instead, the callbacks get no capture and do
+	// nothing; every change still reaches the source through obs_source_update, which the video thread applies.
+	const char *id = obs_source_get_id(m_source);
+	const bool capture = id && (!strcmp(id, "window_capture") || !strcmp(id, "game_capture") ||
+				    !strcmp(id, "monitor_capture"));
+	m_props = capture ? obs_get_source_properties(id) : obs_source_properties(m_source);
 	auto *area = new QScrollArea;
 	area->setWidgetResizable(true);
 	area->setFrameShape(QFrame::NoFrame);

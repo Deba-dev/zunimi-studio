@@ -664,6 +664,59 @@ int main(int argc, char *argv[])
 				QTimer::singleShot(3500, &core, [&core] { core.screenshot(Settings::dataDir() + "/selftest"); });
 			});
 		}
+		if (app.arguments().contains("--selftest-captureprops")) {
+			// Records while opening a Window capture's options and switching its window over and over, the way a
+			// live crash happened on 2026-11-11 (d3d11 access violation). Passing means it survives 15 seconds.
+			QTimer::singleShot(1500, &app, [&core, &window] {
+				QString err;
+				obs_source_t *src = core.addSource("window_capture", "Window", nullptr, ObsCore::Fit::Fill);
+				if (!src || !core.startRecording(Settings::dataDir() + "/selftest", &err)) {
+					blog(LOG_ERROR, "selftest captureprops: FAIL could not start (%s)", err.toUtf8().constData());
+					return;
+				}
+				QStringList windows;
+				obs_properties_t *props = obs_get_source_properties("window_capture");
+				if (obs_property_t *list = obs_properties_get(props, "window"))
+					for (size_t i = 0; i < obs_property_list_item_count(list); i++)
+						if (const char *v = obs_property_list_item_string(list, i); v && *v)
+							windows << QString::fromUtf8(v);
+				obs_properties_destroy(props);
+				// ZUNIMI_TEST_WINDOWS="Code.exe|Discord.exe" keeps only those windows (the crash was a Discord -> VS Code switch)
+				const QString only = qEnvironmentVariable("ZUNIMI_TEST_WINDOWS");
+				if (!only.isEmpty()) {
+					QStringList kept;
+					for (const QString &w : windows)
+						for (const QString &part : only.split('|'))
+							if (w.contains(part, Qt::CaseInsensitive))
+								kept << w;
+					windows = kept;
+				}
+				blog(LOG_INFO, "selftest captureprops: %d windows to switch between: %s", int(windows.size()),
+				     windows.join(" ; ").left(300).toUtf8().constData());
+				auto *turn = new QTimer(&window);
+				auto count = std::make_shared<int>(0);
+				QObject::connect(turn, &QTimer::timeout, &window, [src, windows, count, &window] {
+					auto *dialog = new PropertiesDialog(src, "Window", &window); // builds the options, like a double-click
+					dialog->show();
+					if (!windows.isEmpty()) {
+						obs_data_t *s = obs_data_create();
+						obs_data_set_string(s, "window", windows[*count % windows.size()].toUtf8().constData());
+						obs_source_update(src, s);
+						obs_data_release(s);
+					}
+					QTimer::singleShot(80, dialog, &QObject::deleteLater);
+					++*count;
+				});
+				turn->start(150);
+				QTimer::singleShot(15000, &window, [&core, &window, turn, count] {
+					turn->stop();
+					core.stopRecording();
+					blog(LOG_INFO, "selftest captureprops: %d option rebuilds while recording, no crash", *count);
+					blog(LOG_INFO, "selftest captureprops: all passed");
+					QTimer::singleShot(1500, [&window] { window.modes()->quit(false); });
+				});
+			});
+		}
 		if (app.arguments().contains("--selftest-docks")) {
 			QTimer::singleShot(1200, &app, [&window] {
 				window.selftestDocks();
