@@ -1,3 +1,25 @@
+## Zunimi Stream+ 0.5.1 (preview)
+
+Go live to several platforms at once, landscape and vertical together, plus fixes from the first streams on 0.5.0.
+
+**Install:** download **ZunimiStudio-Setup.exe** below and run it. Already on 0.5.0? The app offers this update by itself. If Windows SmartScreen warns you, click **More info > Run anyway** (the installer isn't code-signed yet).
+
+### Go Live to: multistream and vertical together
+- A new **Go Live to** panel (next to Stats) shows your main stream and every extra platform, each with a status light (live, connecting, reconnecting, failed) and a switch that works **while you're live**, for just that platform.
+- Every platform is **Landscape 16:9** or **Vertical 9:16**. Vertical ones get the vertical canvas, which switches itself on, so YouTube Shorts, TikTok and Instagram can all get the vertical picture while your normal stream goes to YouTube or Twitch.
+- **+ Add destination** has ready settings for Twitch, YouTube, YouTube Shorts, Kick, Facebook, TikTok and Instagram. If you had set up a vertical stream before, it is now in this list.
+
+### YouTube streams (coming)
+- **Pick stream** (Go Live to) and **Tools > Your YouTube streams** will list your scheduled and live YouTube streams after you sign in, and send your stream to the one you pick. The Google sign-in is switched on in a coming update; until then, paste your key in Settings > Stream as before.
+
+### Fixes
+- **Buttons answer at once:** Start/Stop Streaming and Recording show Connecting, Stopping, Starting or Saving right away instead of waiting a few seconds.
+- **Go Live card:** the "Go Live. Be Legendary." card is now a button that starts or ends the stream and shows how long you've been live. The Controls dock can no longer squeeze it out of sight.
+- **Your dock layout is kept** even if the app closes unexpectedly: it is saved within a few seconds of every change.
+- **YouTube chat shows up faster:** new messages are fetched at least every 2 seconds (it could be 10 before).
+- **A crash while live is less likely:** opening or changing a Window, Game or Screen capture's options while live could crash the graphics driver. Those options no longer touch the running capture.
+- All of it in Hindi too.
+
 ## Zunimi Stream+ 0.5.0 (preview)
 
 A new look and a window you can arrange your way: every panel is now a dock, like in OBS.

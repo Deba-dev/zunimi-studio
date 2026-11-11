@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(ZunimiStudio VERSION 0.5.0 LANGUAGES C CXX)
+project(ZunimiStudio VERSION 0.5.1 LANGUAGES C CXX)
 
 # Zunimi Studio links against a libobs built from the OBS source with the "zunimi" preset
 # (see scripts/build-obs.ps1). Everything lives on D: by default; override these on the command line.
