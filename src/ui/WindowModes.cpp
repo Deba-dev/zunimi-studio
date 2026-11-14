@@ -22,16 +22,19 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QToolTip>
+#include <QWindow>
 
 namespace {
 const int BUTTON = 46;
-const char *TIPS[] = {"Minimize", "Back to a normal window", "Close"};
+const int COUNT = 4;
+enum { MOVE, MINIMIZE, WINDOWED, CLOSE };
+const char *TIPS[] = {"Drag to move the window", "Minimize", "Back to a normal window", "Close"};
 } // namespace
 
 // ---- corner buttons
 CornerControls::CornerControls(WindowModes *modes, QWidget *window) : QWidget(window), m_modes(modes)
 {
-	setFixedSize(BUTTON * 3, 32);
+	setFixedSize(BUTTON * COUNT, 32);
 	setMouseTracking(true);
 	setCursor(Qt::PointingHandCursor);
 	hide();
@@ -46,7 +49,7 @@ void CornerControls::place()
 int CornerControls::indexAt(int x) const
 {
 	const int i = x / BUTTON;
-	return i >= 0 && i < 3 ? i : -1;
+	return i >= 0 && i < COUNT ? i : -1;
 }
 
 void CornerControls::mouseMoveEvent(QMouseEvent *event)
@@ -55,6 +58,7 @@ void CornerControls::mouseMoveEvent(QMouseEvent *event)
 	if (i != m_hot) {
 		m_hot = i;
 		setToolTip(i >= 0 ? L(TIPS[i]) : QString());
+		setCursor(i == MOVE ? Qt::SizeAllCursor : Qt::PointingHandCursor);
 		update();
 	}
 }
@@ -71,11 +75,13 @@ void CornerControls::mousePressEvent(QMouseEvent *event)
 		return;
 	const int i = indexAt(int(event->position().x()));
 	hide();
-	if (i == 0)
+	if (i == MOVE)
+		m_modes->dragOut();
+	else if (i == MINIMIZE)
 		parentWidget()->showMinimized();
-	else if (i == 1)
+	else if (i == WINDOWED)
 		m_modes->setMode("windowed");
-	else if (i == 2)
+	else if (i == CLOSE)
 		parentWidget()->close();
 }
 
@@ -86,19 +92,25 @@ void CornerControls::paintEvent(QPaintEvent *)
 	p.setPen(Qt::NoPen);
 	p.setBrush(QColor(12, 14, 20, 225));
 	p.drawRoundedRect(rect(), 10, 10);
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < COUNT; i++) {
 		const QRect r(i * BUTTON, 0, BUTTON, height());
 		if (i == m_hot) {
 			p.setPen(Qt::NoPen);
-			p.setBrush(i == 2 ? QColor(232, 17, 35) : QColor(255, 255, 255, 40));
+			p.setBrush(i == CLOSE ? QColor(232, 17, 35) : QColor(255, 255, 255, 40));
 			p.drawRoundedRect(r.adjusted(3, 3, -3, -3), 8, 8);
 		}
 		p.setPen(QPen(QColor(236, 239, 246), 1.4));
 		p.setBrush(Qt::NoBrush);
 		const QPoint c = r.center();
-		if (i == 0)
+		if (i == MOVE) { // a grip of six dots
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(236, 239, 246));
+			for (int dx : {-3, 3})
+				for (int dy : {-5, 0, 5})
+					p.drawEllipse(c.x() + dx - 1, c.y() + dy - 1, 3, 3);
+		} else if (i == MINIMIZE)
 			p.drawLine(c.x() - 5, c.y(), c.x() + 5, c.y());
-		else if (i == 1)
+		else if (i == WINDOWED)
 			p.drawRect(c.x() - 5, c.y() - 4, 10, 8);
 		else {
 			p.drawLine(c.x() - 5, c.y() - 5, c.x() + 5, c.y() + 5);
@@ -175,6 +187,30 @@ void WindowModes::toggleFullscreen()
 	}
 }
 
+void WindowModes::dragOut()
+{
+	// The move grip: back to a normal window under the mouse, which then follows the mouse until it is let go,
+	// like dragging a maximized window off the top of the screen.
+	const QPoint at = QCursor::pos();
+	const QRect old = m_window->frameGeometry();
+	const double share = double(at.x() - old.x()) / qMax(1, old.width()); // the mouse stays at the same place across the top
+	setMode("windowed");
+	if (m_window->isMaximized())
+		m_window->showNormal();
+	QRect frame = m_window->frameGeometry();
+	QScreen *screen = m_window->screen() ? m_window->screen() : QApplication::primaryScreen();
+	const QRect avail = screen->availableGeometry();
+	if (frame.width() > avail.width() * 0.9 || frame.height() > avail.height() * 0.9) { // nearly the whole screen: a real window
+		m_window->resize(int(avail.width() * 0.7), int(avail.height() * 0.75));
+		frame = m_window->frameGeometry();
+	}
+	m_window->move(at.x() - int(frame.width() * share), at.y() - 12);
+	QTimer::singleShot(0, this, [this] {
+		if (QWindow *handle = m_window->windowHandle(); handle && (QApplication::mouseButtons() & Qt::LeftButton))
+			handle->startSystemMove();
+	});
+}
+
 void WindowModes::apply(const QString &mode)
 {
 	if (m_current == "windowed" && mode != "windowed")
@@ -211,7 +247,7 @@ void WindowModes::apply(const QString &mode)
 
 void WindowModes::remember()
 {
-	if (m_current == "windowed" && m_window->isVisible() && !m_window->isMinimized())
+	if (m_current == "windowed" && m_window->isVisible() && !m_window->isMinimized() && !m_window->isFullScreen())
 		Settings::get().set("window/geometry", m_window->saveGeometry());
 }
 
@@ -220,6 +256,10 @@ void WindowModes::restore()
 	const QByteArray geometry = Settings::get().value("window/geometry").toByteArray();
 	if (!geometry.isEmpty())
 		m_window->restoreGeometry(geometry);
+	// A size saved while the window was fullscreen brought fullscreen back inside Windowed mode: no title bar, so it
+	// could not be dragged. Windowed never starts fullscreen; maximized is fine.
+	if (m_window->windowState() & Qt::WindowFullScreen)
+		m_window->setWindowState(m_window->windowState() & ~Qt::WindowFullScreen);
 }
 
 void WindowModes::hover()

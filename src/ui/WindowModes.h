@@ -54,6 +54,7 @@ public:
 	void notify(const QString &text); // a Windows notification from the tray icon (when there is one) // ask: confirm first (self-tests and "Restart and update" skip it)
 	void syncTray();
 	void remember();
+	void dragOut(); // the move grip in borderless and fullscreen
 
 	QMenu *trayMenu() const { return m_menu; }
 	std::function<QString()> busy;       // a sentence when quitting would stop something
